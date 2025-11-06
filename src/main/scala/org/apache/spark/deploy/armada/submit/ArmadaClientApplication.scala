@@ -19,6 +19,8 @@ package org.apache.spark.deploy.armada.submit
 import api.submit.JobSubmitRequestItem
 import org.apache.spark.deploy.armada.Config.{
   ARMADA_AUTH_TOKEN,
+  ARMADA_DRIVER_DEBUG_ENABLED,
+  ARMADA_DRIVER_DEBUG_PORT,
   ARMADA_DRIVER_JOB_ITEM_TEMPLATE,
   ARMADA_DRIVER_LIMIT_CORES,
   ARMADA_DRIVER_LIMIT_MEMORY,
@@ -263,6 +265,18 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       armadaJobConfig: ArmadaJobConfig,
       conf: SparkConf
   ): (String, Seq[String]) = {
+    // Add JDWP options to SparkConf BEFORE buildSparkConfArgs so they get included in the config passed to the driver
+    if (conf.get(ARMADA_DRIVER_DEBUG_ENABLED)) {
+      val debugPort = conf.get(ARMADA_DRIVER_DEBUG_PORT)
+      val existingJavaOpts = conf.getOption("spark.driver.extraJavaOptions").getOrElse("")
+      val jdwpOptions = s"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:$debugPort"
+      val mergedJavaOpts = if (existingJavaOpts.isEmpty) {
+        jdwpOptions
+      } else {
+        s"$existingJavaOpts $jdwpOptions"
+      }
+      conf.set("spark.driver.extraJavaOptions", mergedJavaOpts)
+    }
 
     val primaryResource = extractPrimaryResource(clientArguments.mainAppResource)
     val executorCount   = SchedulerBackendUtils.getInitialTargetExecutorNumber(conf)
@@ -1069,12 +1083,44 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
         .withApiVersion("v1")
         .withFieldPath("status.podIP")
     )
-    val envVars = Seq(
+    
+    // Parse debug configuration from additionalDriverArgs (which contains --conf args)
+    // Format: --conf spark.armada.driver.debug.enabled=true --conf spark.armada.driver.debug.port=5005
+    def parseConfFromArgs(key: String): Option[String] = {
+      additionalDriverArgs
+        .sliding(2)
+        .find(pair => pair.length == 2 && pair(0) == "--conf" && pair(1).startsWith(s"$key="))
+        .map(_(1).substring(key.length + 1))
+    }
+    
+    val debugEnabled = parseConfFromArgs(ARMADA_DRIVER_DEBUG_ENABLED.key).contains("true")
+    val debugPort = parseConfFromArgs(ARMADA_DRIVER_DEBUG_PORT.key).getOrElse("5005").toInt
+    
+    // Build base environment variables
+    var envVars = Seq(
       EnvVar().withName("SPARK_DRIVER_BIND_ADDRESS").withValueFrom(source),
       EnvVar()
         .withName(ConfigGenerator.ENV_SPARK_CONF_DIR)
         .withValue(ConfigGenerator.REMOTE_CONF_DIR_NAME)
     )
+    
+    // Build driver args
+    val baseDriverArgs = Seq(
+      "driver",
+      "--verbose",
+      "--master",
+      master,
+      "--class",
+      mainClass,
+      "--conf",
+      s"spark.driver.port=$port",
+      "--conf",
+      s"spark.app.id=${armadaJobConfig.applicationId}",
+      "--conf",
+      "spark.driver.host=$(SPARK_DRIVER_BIND_ADDRESS)"
+    )
+    
+    val driverArgsWithDebug = baseDriverArgs ++ additionalDriverArgs
 
     val templateResources = extractResourcesFromTemplate(armadaJobConfig.driverJobItemTemplate)
 
@@ -1111,26 +1157,36 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     val containerImage = armadaJobConfig.cliConfig.containerImage
       .orElse(extractContainerImageFromTemplate(armadaJobConfig.driverJobItemTemplate))
       .get // Safe to use .get because validation ensures container image exists
+    
+    // Build container ports - include debug port if debug is enabled
+    val containerPorts = if (debugEnabled) {
+      Seq(
+        ContainerPort(
+          containerPort = Some(port),
+          name = Some("driver"),
+          protocol = Some("TCP")
+        ),
+        ContainerPort(
+          containerPort = Some(debugPort),
+          name = Some("debug"),
+          protocol = Some("TCP")
+        )
+      )
+    } else {
+      Seq(
+        ContainerPort(
+          containerPort = Some(port),
+          name = Some("driver"),
+          protocol = Some("TCP")
+        )
+      )
+    }
+    
     Container()
       .withName("spark-kubernetes-driver")
       .withImage(containerImage)
       .withImagePullPolicy("IfNotPresent")
-      .withArgs(
-        Seq(
-          "driver",
-          "--verbose",
-          "--master",
-          master,
-          "--class",
-          mainClass,
-          "--conf",
-          s"spark.driver.port=$port",
-          "--conf",
-          s"spark.app.id=${armadaJobConfig.applicationId}",
-          "--conf",
-          "spark.driver.host=$(SPARK_DRIVER_BIND_ADDRESS)"
-        ) ++ additionalDriverArgs
-      )
+      .withArgs(driverArgsWithDebug)
       .withVolumeMounts(volumeMounts)
       .withEnv(envVars)
       .withResources(
@@ -1139,15 +1195,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
           limits = driverLimits
         )
       )
-      .withPorts(
-        Seq(
-          ContainerPort(
-            containerPort = Some(port),
-            name = Some("driver"),
-            protocol = Some("TCP")
-          )
-        )
-      )
+      .withPorts(containerPorts)
   }
 
   private def newExecutorContainer(

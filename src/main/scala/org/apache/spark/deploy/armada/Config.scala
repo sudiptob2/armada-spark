@@ -405,6 +405,27 @@ private[spark] object Config {
       .stringConf
       .createOptional
 
+  val ARMADA_DRIVER_DEBUG_ENABLED: ConfigEntry[Boolean] =
+    ConfigBuilder("spark.armada.driver.debug.enabled")
+      .doc(
+        "If set to true, enables remote debugging for the driver pod. " +
+          "This will automatically configure JDWP and expose the debug port. " +
+          "Default is false. The debug port can be configured via spark.armada.driver.debug.port."
+      )
+      .booleanConf
+      .createWithDefault(false)
+
+  val ARMADA_DRIVER_DEBUG_PORT: ConfigEntry[Int] =
+    ConfigBuilder("spark.armada.driver.debug.port")
+      .doc(
+        "The port number for remote debugging of the driver pod. " +
+          "Default is 5005. This port will be exposed in the driver container when debug is enabled. " +
+          "When debugging is enabled, the JVM will suspend execution until a debugger attaches."
+      )
+      .intConf
+      .checkValue(port => port > 0 && port < 65536, "Port must be between 1 and 65535")
+      .createWithDefault(5005)
+
   def commaSeparatedLabelsToMap(labelList: String): Map[String, String] = {
     parseCommaSeparatedK8sValue(labelList, K8sValidator.Label).map(_.get).toMap
   }
