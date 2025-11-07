@@ -76,3 +76,4 @@ scripts/config.sh
 dependency-reduced-pom.xml
 .spark-*
 scripts/armadactl
+/.run/
