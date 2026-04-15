@@ -46,7 +46,12 @@ RUN if [ "$include_python" = "true" ]; then \
             jupyter \
             notebook \
             ipykernel \
-            pyspark==${spark_version} && \
+            pyspark==${spark_version} \
+            pandas \
+            pyarrow \
+            grpcio \
+            grpcio-status \
+            protobuf && \
         apt-get clean && \
         rm -rf /var/lib/apt/lists/*; \
     fi

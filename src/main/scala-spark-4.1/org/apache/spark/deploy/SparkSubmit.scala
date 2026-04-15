@@ -325,8 +325,6 @@ private[spark] class SparkSubmit extends Logging {
         error("Cluster deploy mode is not applicable to Spark SQL shell.")
       case (_, CLUSTER) if isThriftServer(args.mainClass) =>
         error("Cluster deploy mode is not applicable to Spark Thrift server.")
-      case (_, CLUSTER) if isConnectServer(args.mainClass) =>
-        error("Cluster deploy mode is not applicable to Spark Connect server.")
       case _ =>
     }
 
@@ -1170,7 +1168,8 @@ private[spark] class SparkSubmit extends Logging {
         throw findCause(t)
     } finally {
       if (
-        args.master.startsWith("k8s") && !isShell(args.primaryResource) &&
+        (args.master.startsWith("k8s") || args.master.startsWith("armada")) &&
+        !isShell(args.primaryResource) &&
         !isSqlShell(args.mainClass) && !isThriftServer(args.mainClass) &&
         !isConnectServer(args.mainClass)
       ) {
