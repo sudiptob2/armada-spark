@@ -81,6 +81,9 @@ scripts/config.sh
 *.key
 *.pem
 
+# benchmark kubeconfig
+benchmark/kubeconfig
+
 dependency-reduced-pom.xml
 .spark-*
 scripts/armadactl
