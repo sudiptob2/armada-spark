@@ -451,6 +451,48 @@
                             <shadedClassifierName>all</shadedClassifierName>
                         </configuration>
                     </execution>
+                    <execution>
+                        <id>connect-auth-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <shadedClassifierName>connect-auth</shadedClassifierName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <includes>
+                                    <include>${project.groupId}:${project.artifactId}</include>
+                                    <include>com.auth0:java-jwt</include>
+                                    <include>com.auth0:jwks-rsa</include>
+                                </includes>
+                            </artifactSet>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>${project.groupId}:${project.artifactId}</artifact>
+                                    <includes>
+                                        <include>io/armadaproject/spark/connect/auth/**</include>
+                                    </includes>
+                                </filter>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/MANIFEST.MF</exclude>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>module-info.class</exclude>
+                                        <exclude>META-INF/versions/*/module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <!-- No <relocations>: io.grpc.* must stay unshaded so Spark Connect can load the interceptor. -->
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
             <!-- Scalatest runs unit tests only, excludes E2E tests -->
