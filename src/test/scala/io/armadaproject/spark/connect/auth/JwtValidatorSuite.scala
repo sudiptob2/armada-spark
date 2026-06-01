@@ -68,4 +68,15 @@ class JwtValidatorSuite extends AnyFunSuite with Matchers {
     val validator = new JwtValidator(buildVerifier(), issuer, null)
     a[JWTVerificationException] should be thrownBy validator.verify(token)
   }
+
+  test("parseJwksUri extracts jwks_uri from an OIDC discovery doc") {
+    val body =
+      """{"issuer":"https://idp.test/","jwks_uri":"https://idp.test/jwks","other":"x"}"""
+    JwtValidator.parseJwksUri(body) shouldBe "https://idp.test/jwks"
+  }
+
+  test("parseJwksUri throws when jwks_uri is missing") {
+    val body = """{"issuer":"https://idp.test/"}"""
+    an[IllegalStateException] should be thrownBy JwtValidator.parseJwksUri(body)
+  }
 }
