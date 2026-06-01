@@ -139,4 +139,37 @@ class JwtAuthInterceptorSuite extends AnyFunSuite with Matchers {
     verify(call, never()).close(any(), any())
     verify(handler).startCall(any(), any())
   }
+
+  test("uses the configured user claim (e.g. email) for the owner check") {
+    val token = JWT
+      .create()
+      .withIssuer(issuer)
+      .withSubject("opaque-id-12345")
+      .withClaim("email", "alice@example.com")
+      .withExpiresAt(new Date(System.currentTimeMillis() + 60000))
+      .sign(alg)
+
+    val interceptor     = new JwtAuthInterceptor(validatorFor(), "alice@example.com", "email")
+    val (call, handler) = runInterceptor(interceptor, Some("Bearer " + token))
+
+    verify(call, never()).close(any(), any())
+    verify(handler).startCall(any(), any())
+  }
+
+  test("rejects with PERMISSION_DENIED when configured claim is missing from token") {
+    val tokenWithoutEmail = JWT
+      .create()
+      .withIssuer(issuer)
+      .withSubject("opaque-id-12345")
+      .withExpiresAt(new Date(System.currentTimeMillis() + 60000))
+      .sign(alg)
+
+    val interceptor     = new JwtAuthInterceptor(validatorFor(), "alice@example.com", "email")
+    val (call, handler) = runInterceptor(interceptor, Some("Bearer " + tokenWithoutEmail))
+
+    val statusCap = ArgumentCaptor.forClass(classOf[Status])
+    verify(call).close(statusCap.capture(), any(classOf[Metadata]))
+    statusCap.getValue.getCode shouldBe Status.PERMISSION_DENIED.getCode
+    verify(handler, never()).startCall(any(), any())
+  }
 }
