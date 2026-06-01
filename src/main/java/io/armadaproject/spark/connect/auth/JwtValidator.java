@@ -76,6 +76,7 @@ public class JwtValidator {
             jwkProvider = new JwkProviderBuilder(new URL(jwksUrl))
                     .cached(10, 24, TimeUnit.HOURS)
                     .rateLimited(10, 1, TimeUnit.MINUTES)
+                    .timeouts(5_000, 5_000)  // connect, read; in milliseconds
                     .build();
         } catch (MalformedURLException e) {
             throw new IllegalStateException("Invalid jwks URL: " + jwksUrl, e);
@@ -162,7 +163,8 @@ public class JwtValidator {
             try {
                 return (RSAPublicKey) jwkProvider.get(keyId).getPublicKey();
             } catch (Exception e) {
-                throw new RuntimeException("Failed to fetch public key for kid=" + keyId, e);
+                throw new JWTVerificationException(
+                        "Failed to fetch public key for kid=" + keyId, e);
             }
         }
 

@@ -79,4 +79,45 @@ class JwtValidatorSuite extends AnyFunSuite with Matchers {
     val body = """{"issuer":"https://idp.test/"}"""
     an[IllegalStateException] should be thrownBy JwtValidator.parseJwksUri(body)
   }
+
+  test("accepts a token whose aud matches the configured audience") {
+    val token = JWT
+      .create()
+      .withIssuer(issuer)
+      .withSubject("alice@example.com")
+      .withAudience("spark-connect")
+      .withExpiresAt(new Date(System.currentTimeMillis() + 60000))
+      .sign(alg)
+
+    val verifier  = JWT.require(alg).withIssuer(issuer).withAudience("spark-connect").build()
+    val validator = new JwtValidator(verifier, issuer, "spark-connect")
+    validator.verify(token).getSubject shouldBe "alice@example.com"
+  }
+
+  test("rejects a token whose aud does not match the configured audience") {
+    val token = JWT
+      .create()
+      .withIssuer(issuer)
+      .withSubject("alice@example.com")
+      .withAudience("some-other-app")
+      .withExpiresAt(new Date(System.currentTimeMillis() + 60000))
+      .sign(alg)
+
+    val verifier  = JWT.require(alg).withIssuer(issuer).withAudience("spark-connect").build()
+    val validator = new JwtValidator(verifier, issuer, "spark-connect")
+    a[JWTVerificationException] should be thrownBy validator.verify(token)
+  }
+
+  test("rejects a token with no aud when audience is required") {
+    val token = JWT
+      .create()
+      .withIssuer(issuer)
+      .withSubject("alice@example.com")
+      .withExpiresAt(new Date(System.currentTimeMillis() + 60000))
+      .sign(alg)
+
+    val verifier  = JWT.require(alg).withIssuer(issuer).withAudience("spark-connect").build()
+    val validator = new JwtValidator(verifier, issuer, "spark-connect")
+    a[JWTVerificationException] should be thrownBy validator.verify(token)
+  }
 }
