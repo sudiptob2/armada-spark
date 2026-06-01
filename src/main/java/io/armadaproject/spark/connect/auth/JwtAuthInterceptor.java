@@ -53,6 +53,10 @@ public class JwtAuthInterceptor implements ServerInterceptor {
 
     /** Package-private constructor for tests. */
     JwtAuthInterceptor(JwtValidator validator, String owner, String userClaim) {
+        if (owner == null || owner.isBlank()) {
+            throw new IllegalStateException(
+                    "owner must not be null or blank; set SPARK_ARMADA_CONNECT_OWNER");
+        }
         this.validator = validator;
         this.owner = owner;
         this.userClaim = userClaim;

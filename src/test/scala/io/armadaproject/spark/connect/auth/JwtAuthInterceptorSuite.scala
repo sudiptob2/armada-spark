@@ -172,4 +172,12 @@ class JwtAuthInterceptorSuite extends AnyFunSuite with Matchers {
     statusCap.getValue.getCode shouldBe Status.PERMISSION_DENIED.getCode
     verify(handler, never()).startCall(any(), any())
   }
+
+  test("throws when owner is null") {
+    an[IllegalStateException] should be thrownBy new JwtAuthInterceptor(validatorFor(), null, "sub")
+  }
+
+  test("throws when owner is blank") {
+    an[IllegalStateException] should be thrownBy new JwtAuthInterceptor(validatorFor(), "  ", "sub")
+  }
 }
