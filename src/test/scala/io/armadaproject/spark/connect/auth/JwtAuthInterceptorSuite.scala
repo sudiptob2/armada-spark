@@ -96,4 +96,47 @@ class JwtAuthInterceptorSuite extends AnyFunSuite with Matchers {
     statusCap.getValue.getCode shouldBe Status.PERMISSION_DENIED.getCode
     verify(handler, never()).startCall(any(), any())
   }
+
+  test("rejects with UNAUTHENTICATED when Authorization header is not a bearer token") {
+    val interceptor     = new JwtAuthInterceptor(validatorFor(), "alice@example.com", "sub")
+    val (call, handler) = runInterceptor(interceptor, Some("Basic dXNlcjpwYXNz"))
+
+    val statusCap = ArgumentCaptor.forClass(classOf[Status])
+    verify(call).close(statusCap.capture(), any(classOf[Metadata]))
+    statusCap.getValue.getCode shouldBe Status.UNAUTHENTICATED.getCode
+    verify(handler, never()).startCall(any(), any())
+  }
+
+  test("rejects with UNAUTHENTICATED when JWT signature is invalid") {
+    val wrongKeyPair = {
+      val gen = KeyPairGenerator.getInstance("RSA"); gen.initialize(2048); gen.generateKeyPair()
+    }
+    val wrongAlg = Algorithm.RSA256(
+      wrongKeyPair.getPublic.asInstanceOf[RSAPublicKey],
+      wrongKeyPair.getPrivate.asInstanceOf[RSAPrivateKey]
+    )
+    val tamperedToken = JWT
+      .create()
+      .withIssuer(issuer)
+      .withSubject("alice@example.com")
+      .withExpiresAt(new Date(System.currentTimeMillis() + 60000))
+      .sign(wrongAlg)
+
+    val interceptor     = new JwtAuthInterceptor(validatorFor(), "alice@example.com", "sub")
+    val (call, handler) = runInterceptor(interceptor, Some("Bearer " + tamperedToken))
+
+    val statusCap = ArgumentCaptor.forClass(classOf[Status])
+    verify(call).close(statusCap.capture(), any(classOf[Metadata]))
+    statusCap.getValue.getCode shouldBe Status.UNAUTHENTICATED.getCode
+    verify(handler, never()).startCall(any(), any())
+  }
+
+  test("accepts the bearer prefix case-insensitively") {
+    val interceptor = new JwtAuthInterceptor(validatorFor(), "alice@example.com", "sub")
+    val (call, handler) =
+      runInterceptor(interceptor, Some("bearer " + tokenFor("alice@example.com")))
+
+    verify(call, never()).close(any(), any())
+    verify(handler).startCall(any(), any())
+  }
 }
