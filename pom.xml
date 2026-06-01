@@ -156,6 +156,26 @@
           <version>0.3.0</version>
         </dependency>
 
+        <!-- JWT validation for Spark Connect auth interceptor (un-relocated connect-auth JAR) -->
+        <dependency>
+            <groupId>com.auth0</groupId>
+            <artifactId>java-jwt</artifactId>
+            <version>4.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.auth0</groupId>
+            <artifactId>jwks-rsa</artifactId>
+            <version>0.22.1</version>
+        </dependency>
+        <!-- gRPC interceptor SPI: pinned at the version armada-scala-client brings in so
+             the main shaded JAR is unchanged; not bundled into the un-relocated connect-auth
+             JAR (see Task 2's shade includes). -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-api</artifactId>
+            <version>1.67.1</version>
+        </dependency>
+
         <!-- Test dependencies -->
         <dependency>
           <groupId>org.scalatest</groupId>
