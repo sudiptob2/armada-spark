@@ -216,6 +216,49 @@ Use `kubectl port-forward` command for the connect port (`15002`). Allocation fo
 
 See [`spark_connect_demo.ipynb`](example/jupyter/notebooks/spark_connect_demo.ipynb).
 
+##### Securing Spark Connect with JWT
+
+The Spark Connect server can be locked down so only the user who submitted it can issue gRPC calls. The interceptor is shipped as a separate un-shaded JAR (`armada-cluster-manager_*-connect-auth.jar`) so its `io.grpc.*` references stay compatible with the gRPC stack Spark Connect ships at runtime.
+
+Add the JAR via `--jars`, register the interceptor class, and propagate four env vars to the driver pod:
+
+```bash
+./scripts/runJupyter.sh -C \
+  --jars target/armada-cluster-manager_2.13-1.0.0-SNAPSHOT-connect-auth.jar \
+  --conf spark.connect.grpc.interceptor.classes=io.armadaproject.spark.connect.auth.JwtAuthInterceptor \
+  --conf spark.kubernetes.driverEnv.SPARK_ARMADA_CONNECT_OWNER=alice@example.com \
+  --conf spark.kubernetes.driverEnv.OIDC_ISSUER_URL=https://idp.example/ \
+  --conf spark.kubernetes.driverEnv.OIDC_USER_CLAIM=email \
+  --conf spark.kubernetes.driverEnv.OIDC_AUDIENCE=spark-connect    # optional
+```
+
+Env var reference:
+
+| Var | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `SPARK_ARMADA_CONNECT_OWNER` | yes | none | Identity (claim value) the bearer token must carry to be accepted. Driver fails to start if unset. |
+| `OIDC_ISSUER_URL` | yes | none | OIDC issuer used for `iss` validation and JWKS discovery at `<issuer>/.well-known/openid-configuration`. |
+| `OIDC_USER_CLAIM` | no | `sub` | JWT claim compared against `SPARK_ARMADA_CONNECT_OWNER`. Common alternatives: `email`, `preferred_username`. |
+| `OIDC_AUDIENCE` | no | none | If set, the `aud` claim is enforced. |
+| `OIDC_JWKS_URL` | no | discovered | Skip OIDC discovery and use this JWKS URL directly. |
+
+At runtime the interceptor:
+
+- requires a bearer JWT on every gRPC call,
+- validates signature (RS256 against the IdP's JWKS), issuer, expiry, and (when set) audience,
+- compares the configured user claim against `SPARK_ARMADA_CONNECT_OWNER`, rejecting non-matches with `PERMISSION_DENIED`.
+
+Obtain a JWT from your internal OIDC tool and pass it from the client:
+
+```python
+from pyspark.sql import SparkSession
+token = "<jwt-from-internal-cli>"
+spark = SparkSession.builder.remote(f"sc://localhost:15002/;token={token}").getOrCreate()
+spark.range(10).count()
+```
+
+If `SPARK_ARMADA_CONNECT_OWNER` is unset the driver fails to start.
+
 ### Spark History Server
 
 View event logs from completed jobs:
