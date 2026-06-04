@@ -218,18 +218,28 @@ See [`spark_connect_demo.ipynb`](example/jupyter/notebooks/spark_connect_demo.ip
 
 ##### Securing Spark Connect with JWT
 
-The Spark Connect server can be locked down so only the user who submitted it can issue gRPC calls. The interceptor is shipped as a separate un-shaded JAR (`armada-cluster-manager_*-connect-auth.jar`) so its `io.grpc.*` references stay compatible with the gRPC stack Spark Connect ships at runtime.
+The Spark Connect server can be locked down so only the user who submitted it can issue gRPC calls. The interceptor ships in a separate un-shaded JAR (`armada-cluster-manager_*-connect-auth.jar`) baked into the image so its `io.grpc.*` references stay compatible with the gRPC stack Spark Connect uses at runtime.
 
-Add the JAR via `--jars`, register the interceptor class, and propagate four env vars to the driver pod:
+`runJupyter.sh -C` auto-enables auth when `SPARK_ARMADA_CONNECT_OWNER` is set. Put the values in `scripts/config.sh`:
 
 ```bash
-./scripts/runJupyter.sh -C \
-  --jars target/armada-cluster-manager_2.13-1.0.0-SNAPSHOT-connect-auth.jar \
-  --conf spark.connect.grpc.interceptor.classes=io.armadaproject.spark.connect.auth.JwtAuthInterceptor \
-  --conf spark.kubernetes.driverEnv.SPARK_ARMADA_CONNECT_OWNER=alice@example.com \
-  --conf spark.kubernetes.driverEnv.OIDC_ISSUER_URL=https://idp.example/ \
-  --conf spark.kubernetes.driverEnv.OIDC_USER_CLAIM=email \
-  --conf spark.kubernetes.driverEnv.OIDC_AUDIENCE=spark-connect    # optional
+export SPARK_ARMADA_CONNECT_OWNER=alice@example.com
+export OIDC_ISSUER_URL=https://idp.example/
+export OIDC_USER_CLAIM=email              # optional, default sub
+export OIDC_AUDIENCE=spark-connect        # optional
+export OIDC_JWKS_URL=https://idp.example/jwks   # optional, default is OIDC discovery
+```
+
+Then submit normally:
+
+```bash
+./scripts/runJupyter.sh -C
+```
+
+Skip auth for a single invocation by clearing the owner:
+
+```bash
+SPARK_ARMADA_CONNECT_OWNER= ./scripts/runJupyter.sh -C
 ```
 
 Env var reference:

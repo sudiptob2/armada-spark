@@ -159,6 +159,19 @@ if [ "$USE_SPARK_CONNECT" = true ]; then
     # Add event log conf
     SPARK_SUBMIT_ARGS+=(${EVENT_LOG_CONF[@]+"${EVENT_LOG_CONF[@]}"})
 
+    # Auto-enable JWT auth when SPARK_ARMADA_CONNECT_OWNER is set.
+    # Skip auth for one run with: SPARK_ARMADA_CONNECT_OWNER= ./scripts/runJupyter.sh -C
+    if [ -n "${SPARK_ARMADA_CONNECT_OWNER:-}" ]; then
+        SPARK_SUBMIT_ARGS+=(
+            --conf spark.connect.grpc.interceptor.classes=io.armadaproject.spark.connect.auth.JwtAuthInterceptor
+            --conf spark.kubernetes.driverEnv.SPARK_ARMADA_CONNECT_OWNER=$SPARK_ARMADA_CONNECT_OWNER
+        )
+        [ -n "${OIDC_ISSUER_URL:-}" ] && SPARK_SUBMIT_ARGS+=(--conf spark.kubernetes.driverEnv.OIDC_ISSUER_URL=$OIDC_ISSUER_URL)
+        [ -n "${OIDC_USER_CLAIM:-}" ] && SPARK_SUBMIT_ARGS+=(--conf spark.kubernetes.driverEnv.OIDC_USER_CLAIM=$OIDC_USER_CLAIM)
+        [ -n "${OIDC_AUDIENCE:-}" ]   && SPARK_SUBMIT_ARGS+=(--conf spark.kubernetes.driverEnv.OIDC_AUDIENCE=$OIDC_AUDIENCE)
+        [ -n "${OIDC_JWKS_URL:-}" ]   && SPARK_SUBMIT_ARGS+=(--conf spark.kubernetes.driverEnv.OIDC_JWKS_URL=$OIDC_JWKS_URL)
+    fi
+
     # Add primary resource
     SPARK_SUBMIT_ARGS+=($CONNECT_JAR_REMOTE)
 
