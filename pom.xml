@@ -490,7 +490,15 @@
                                     </excludes>
                                 </filter>
                             </filters>
-                            <!-- No <relocations>: io.grpc.* must stay unshaded so Spark Connect can load the interceptor. -->
+                            <!-- Spark Connect shades gRPC under org.sparkproject.connect.grpc.*; the
+                                 interceptor registry casts to that shaded type. Relocate so our class
+                                 implements the namespace Spark Connect actually exposes at runtime. -->
+                            <relocations>
+                                <relocation>
+                                    <pattern>io.grpc.</pattern>
+                                    <shadedPattern>org.sparkproject.connect.grpc.</shadedPattern>
+                                </relocation>
+                            </relocations>
                         </configuration>
                     </execution>
                 </executions>
