@@ -49,6 +49,7 @@ import org.apache.spark.deploy.armada.Config.{
   ARMADA_SPARK_DRIVER_INGRESS_ANNOTATIONS,
   ARMADA_SPARK_DRIVER_INGRESS_CERT_NAME,
   ARMADA_SPARK_DRIVER_INGRESS_ENABLED,
+  ARMADA_SPARK_DRIVER_INGRESS_PORT,
   ARMADA_SPARK_DRIVER_INGRESS_TLS_ENABLED,
   ARMADA_SPARK_DRIVER_LABELS,
   ARMADA_SPARK_EXECUTOR_LABELS,
@@ -168,6 +169,16 @@ private[spark] object ArmadaClientApplication {
     OAuthSidecarBuilder.getOAuthProxyPort(conf).getOrElse {
       conf.getInt("spark.ui.port", DEFAULT_SPARK_UI_PORT)
     }
+  }
+
+  /** Returns the port the ingress should target.
+    *
+    * Honours `spark.armada.driver.ingress.port` when set (used by Spark Connect to point at the
+    * gRPC port 15002). Otherwise falls back to the effective UI port for backward compatibility
+    * with the existing Spark UI ingress behaviour.
+    */
+  private[submit] def getEffectiveIngressPort(conf: SparkConf): Int = {
+    conf.get(ARMADA_SPARK_DRIVER_INGRESS_PORT).getOrElse(getEffectiveUIPort(conf))
   }
 }
 
@@ -1633,8 +1644,10 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
 
   /** Builds container ports for the driver.
     *
-    * Always includes the driver port for executor communication. Includes UI port only when ingress
-    * is enabled without OAuth (OAuth sidecar handles UI exposure).
+    * Always includes the driver port for executor communication. When ingress is enabled and OAuth
+    * is not, exposes the effective ingress port (Spark UI port by default, or whatever
+    * `spark.armada.driver.ingress.port` overrides it to, e.g. 15002 for Spark Connect). When OAuth
+    * is enabled, the OAuth sidecar handles UI exposure so no extra port is declared here.
     */
   private def buildDriverContainerPorts(driverPort: Int, conf: SparkConf): Seq[ContainerPort] = {
     val driverPortSpec = ContainerPort(
@@ -1646,17 +1659,16 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     val ingressEnabled = conf.get(ARMADA_SPARK_DRIVER_INGRESS_ENABLED)
     val oauthEnabled   = conf.get(ARMADA_OAUTH_ENABLED)
 
-    // Only expose UI port directly when ingress is enabled but OAuth is not.
-    // When OAuth is enabled, the OAuth sidecar handles UI port exposure.
-    val needsUIPort = ingressEnabled && !oauthEnabled
-    if (needsUIPort) {
+    if (ingressEnabled && !oauthEnabled) {
+      val ingressPort = ArmadaClientApplication.getEffectiveIngressPort(conf)
       val sparkUIPort = conf.getInt("spark.ui.port", ArmadaClientApplication.DEFAULT_SPARK_UI_PORT)
-      val uiPortSpec = ContainerPort(
-        containerPort = Some(sparkUIPort),
-        name = Some("ui"),
+      val portName    = if (ingressPort == sparkUIPort) "ui" else "ingress"
+      val ingressPortSpec = ContainerPort(
+        containerPort = Some(ingressPort),
+        name = Some(portName),
         protocol = Some("TCP")
       )
-      Seq(driverPortSpec, uiPortSpec)
+      Seq(driverPortSpec, ingressPortSpec)
     } else {
       Seq(driverPortSpec)
     }
@@ -1822,11 +1834,16 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       driverPort: Int,
       conf: SparkConf
   ): Seq[api.submit.ServiceConfig] = {
-    val uiPort = ArmadaClientApplication.getEffectiveUIPort(conf)
+    val uiPort      = ArmadaClientApplication.getEffectiveUIPort(conf)
+    val ingressPort = ArmadaClientApplication.getEffectiveIngressPort(conf)
+    // Headless service exposes driver port, UI port, and (when distinct from the UI port,
+    // e.g. Spark Connect on 15002) the explicit ingress port. Otherwise nginx-ingress
+    // can't reach the gRPC backend.
+    val ports = Seq(driverPort, uiPort, ingressPort).distinct
     Seq(
       api.submit.ServiceConfig(
         `type` = api.submit.ServiceType.Headless,
-        ports = Seq(driverPort, uiPort),
+        ports = ports,
         name = ""
       )
     )
@@ -1840,7 +1857,7 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       templateIngress: Option[api.submit.IngressConfig],
       conf: SparkConf
   ): api.submit.IngressConfig = {
-    val ingressPort = ArmadaClientApplication.getEffectiveUIPort(conf)
+    val ingressPort = ArmadaClientApplication.getEffectiveIngressPort(conf)
     api.submit.IngressConfig(
       `type` = api.submit.IngressType.Ingress,
       ports = Seq(ingressPort),
