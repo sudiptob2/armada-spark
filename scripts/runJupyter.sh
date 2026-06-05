@@ -1,20 +1,26 @@
 #!/bin/bash
 set -euo pipefail
 
-# Parse -C (Spark Connect) flag before sourcing init.sh
+# Parse our flags before sourcing init.sh:
+#   -C  Spark Connect mode
+#   -J  Jupyter-only: skip the Connect server submit; just restart the Jupyter
+#       container (reads ingress hostname from the existing K8s Ingress). Use after
+#       your token expires or after editing the notebook.
 USE_SPARK_CONNECT=false
+SKIP_SUBMIT=false
 for arg in "$@"; do
-    if [ "$arg" = "-C" ]; then
-        USE_SPARK_CONNECT=true
-        break
-    fi
+    case "$arg" in
+        -C) USE_SPARK_CONNECT=true ;;
+        -J) SKIP_SUBMIT=true ;;
+    esac
 done
-# Remove -C from args so init.sh doesn't see it
+# Remove our flags so init.sh doesn't see them
 filtered_args=()
 for arg in "$@"; do
-    if [ "$arg" != "-C" ]; then
-        filtered_args+=("$arg")
-    fi
+    case "$arg" in
+        -C|-J) ;;
+        *) filtered_args+=("$arg") ;;
+    esac
 done
 set -- "${filtered_args[@]+"${filtered_args[@]}"}"
 
@@ -85,7 +91,7 @@ if [ -d "$notebooks_dir" ]; then
 fi
 
 # ── Spark Connect: submit driver + executors to Armada ──
-if [ "$USE_SPARK_CONNECT" = true ]; then
+if [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
     CONNECT_JAR_NAME="spark-connect_${SCALA_BIN_VERSION}-${SPARK_VERSION}.jar"
     CONNECT_JAR_LOCAL="$root/extraJars/$CONNECT_JAR_NAME"
     CONNECT_JAR_REMOTE="local:///opt/spark/jars/$CONNECT_JAR_NAME"
@@ -172,6 +178,21 @@ if [ "$USE_SPARK_CONNECT" = true ]; then
         [ -n "${OIDC_JWKS_URL:-}" ]   && SPARK_SUBMIT_ARGS+=(--conf spark.kubernetes.driverEnv.OIDC_JWKS_URL=$OIDC_JWKS_URL)
     fi
 
+    # Auto-enable Armada ingress for the gRPC port when SPARK_CONNECT_INGRESS=true.
+    # Skip with: SPARK_CONNECT_INGRESS=false ./scripts/runJupyter.sh -C
+    # SPARK_CONNECT_INGRESS_TLS=true + SPARK_CONNECT_INGRESS_CERT=<secret-name> turns
+    # on TLS termination at the ingress, using the named K8s TLS Secret.
+    if [ "${SPARK_CONNECT_INGRESS:-false}" = "true" ]; then
+        SPARK_SUBMIT_ARGS+=(
+            --conf spark.armada.driver.ingress.enabled=true
+            --conf spark.armada.driver.ingress.port=$CONNECT_PORT
+            --conf spark.armada.driver.ingress.tls.enabled=${SPARK_CONNECT_INGRESS_TLS:-false}
+            --conf spark.armada.driver.ingress.annotations=nginx.ingress.kubernetes.io/backend-protocol=GRPC
+        )
+        [ -n "${SPARK_CONNECT_INGRESS_CERT:-}" ] && \
+            SPARK_SUBMIT_ARGS+=(--conf spark.armada.driver.ingress.certName=$SPARK_CONNECT_INGRESS_CERT)
+    fi
+
     # Add primary resource
     SPARK_SUBMIT_ARGS+=($CONNECT_JAR_REMOTE)
 
@@ -186,10 +207,55 @@ if [ "$USE_SPARK_CONNECT" = true ]; then
     echo ""
     echo "Spark Connect server submitted."
     echo ""
+fi
+
+# Capture the ingress hostname so the Jupyter container's DNS can be wired to reach it.
+# Runs for both `-C` (after submit, polls up to 60s) and `-C -J` (reads existing Ingress).
+# Without this, the container resolves the hostname via the host's /etc/hosts -> 127.0.0.1,
+# which inside the container is the container's own loopback (not the host).
+if [ "$USE_SPARK_CONNECT" = true ] && [ "${SPARK_CONNECT_INGRESS:-false}" = "true" ]; then
+    if [ "${SPARK_CONNECT_INGRESS_TLS:-false}" = "true" ]; then
+        INGRESS_PORT_DEFAULT="${SPARK_CONNECT_INGRESS_PORT:-9443}"
+    else
+        INGRESS_PORT_DEFAULT="${SPARK_CONNECT_INGRESS_PORT:-9999}"
+    fi
+    INGRESS_HOST=""
+    if [ "$SKIP_SUBMIT" = true ]; then
+        INGRESS_HOST=$(kubectl get ingress -n "${ARMADA_NAMESPACE:-default}" \
+            -o jsonpath='{.items[?(@.metadata.labels.armada_job_id)].spec.rules[0].host}' \
+            2>/dev/null | awk '{print $1}')
+        if [ -z "$INGRESS_HOST" ]; then
+            echo "Error: -J skips submit but no existing driver Ingress was found."
+            echo "Run './scripts/runJupyter.sh -C' first to submit the Spark Connect server."
+            exit 1
+        fi
+    else
+        # Timeout configurable via SPARK_CONNECT_INGRESS_WAIT (default 120s). Override
+        # with SPARK_CONNECT_INGRESS_WAIT=300 ./scripts/runJupyter.sh -C if the cluster
+        # is slow to schedule the driver pod.
+        WAIT_SECS="${SPARK_CONNECT_INGRESS_WAIT:-120}"
+        echo "Waiting up to ${WAIT_SECS}s for Armada to create the driver Ingress..."
+        ATTEMPTS=$((WAIT_SECS / 2))
+        for _i in $(seq 1 "$ATTEMPTS"); do
+            INGRESS_HOST=$(kubectl get ingress -n "${ARMADA_NAMESPACE:-default}" \
+                -o jsonpath='{.items[?(@.metadata.labels.armada_job_id)].spec.rules[0].host}' \
+                2>/dev/null | awk '{print $1}')
+            [ -n "$INGRESS_HOST" ] && break
+            sleep 2
+        done
+        [ -z "$INGRESS_HOST" ] && \
+            echo "WARNING: No Ingress appeared within ${WAIT_SECS}s. Set SPARK_CONNECT_HOST manually, or re-run with SPARK_CONNECT_INGRESS_WAIT=<more>."
+    fi
+    if [ -n "$INGRESS_HOST" ]; then
+        echo "Ingress hostname: $INGRESS_HOST"
+        export SPARK_CONNECT_HOST="$INGRESS_HOST"
+        export SPARK_CONNECT_PORT="$INGRESS_PORT_DEFAULT"
+    fi
+elif [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
     echo "Port-forward to the driver pod before using Jupyter:"
     echo "  kubectl port-forward -n ${ARMADA_NAMESPACE:-default} \$(kubectl get pod -n ${ARMADA_NAMESPACE:-default} -l spark-role=driver,spark-app-name=spark-connect-server -o name | head -1) $CONNECT_PORT:$CONNECT_PORT"
-    echo ""
 fi
+echo ""
 
 # ── Start Jupyter container ──
 
@@ -200,10 +266,40 @@ if docker ps -a --format '{{.Names}}' | grep -q "^armada-jupyter$"; then
 fi
 
 if [ "$USE_SPARK_CONNECT" = true ]; then
-    # Spark Connect mode: thin client, no driver ports needed
+    # Spark Connect mode: thin client, no driver ports needed.
+    # SPARK_CONNECT_TOKEN / HOST / PORT are forwarded so the notebook can read
+    # them from os.environ and assemble the remote URL (token = bearer auth,
+    # host/port = ingress vs. port-forward target).
+    #
+    # When an ingress hostname is known (SPARK_CONNECT_HOST is the per-job FQDN),
+    # add a docker --add-host mapping to host-gateway. Otherwise the container's
+    # DNS resolves the hostname via the host's /etc/hosts -> 127.0.0.1, which inside
+    # the container is the container's own loopback (not the host) -> connection refused.
+    ADD_HOST_ARGS=()
+    if [ -n "${SPARK_CONNECT_HOST:-}" ] && [ "$SPARK_CONNECT_HOST" != "host.docker.internal" ]; then
+        ADD_HOST_ARGS=(--add-host "${SPARK_CONNECT_HOST}:host-gateway")
+    fi
+    # gRPC inside the container uses its own trust store and does NOT see CAs from the
+    # laptop's system keychain. When the ingress uses a custom/self-signed cert (mkcert,
+    # cert-manager local CA), mount the CA into the container and point gRPC at it.
+    # Default to mkcert's rootCA.pem; override with SPARK_CONNECT_TLS_CA_PATH.
+    TLS_CA_ARGS=()
+    DEFAULT_MKCERT_CA="${HOME}/Library/Application Support/mkcert/rootCA.pem"
+    TLS_CA_PATH="${SPARK_CONNECT_TLS_CA_PATH:-$DEFAULT_MKCERT_CA}"
+    if [ "${SPARK_CONNECT_INGRESS_TLS:-false}" = "true" ] && [ -f "$TLS_CA_PATH" ]; then
+        TLS_CA_ARGS=(
+            -v "${TLS_CA_PATH}:/etc/ssl/certs/spark-connect-ca.pem:ro"
+            -e GRPC_DEFAULT_SSL_ROOTS_FILE_PATH=/etc/ssl/certs/spark-connect-ca.pem
+        )
+    fi
     docker run -d \
       --name armada-jupyter \
       -p ${JUPYTER_PORT}:8888 \
+      -e SPARK_CONNECT_TOKEN="${SPARK_CONNECT_TOKEN:-}" \
+      -e SPARK_CONNECT_HOST="${SPARK_CONNECT_HOST:-host.docker.internal}" \
+      -e SPARK_CONNECT_PORT="${SPARK_CONNECT_PORT:-$CONNECT_PORT}" \
+      "${ADD_HOST_ARGS[@]+"${ADD_HOST_ARGS[@]}"}" \
+      "${TLS_CA_ARGS[@]+"${TLS_CA_ARGS[@]}"}" \
       -v "$workspace_dir:/home/spark/workspace" \
       --rm \
       ${IMAGE_NAME} \
