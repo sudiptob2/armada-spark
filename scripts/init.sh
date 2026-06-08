@@ -156,6 +156,13 @@ if [ "$ARMADA_EVENT_WATCHER_USE_TLS" != "" ]; then
     ARMADA_AUTH_ARGS+=("--conf" "spark.armada.eventWatcher.useTls=$ARMADA_EVENT_WATCHER_USE_TLS")
 fi
 
+# Forward the JWT to the driver pod so getAuthToken.sh can echo it from there.
+# Without this, the driver pod's ArmadaClusterManagerBackend can't authenticate
+# to armada-server, and the dynamic executor allocator never initializes.
+if [ "${ARMADA_AUTH_TOKEN:-}" != "" ]; then
+    ARMADA_AUTH_ARGS+=("--conf" "spark.kubernetes.driverEnv.ARMADA_AUTH_TOKEN=$ARMADA_AUTH_TOKEN")
+fi
+
 # OAuth proxy for the Spark UI. Requires cluster deploy mode + ingress.
 OAUTH_CONF=()
 if [ "${OAUTH_ENABLED:-false}" == "true" ]; then
