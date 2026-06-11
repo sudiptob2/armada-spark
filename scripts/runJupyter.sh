@@ -165,16 +165,14 @@ if [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
     # Add event log conf
     SPARK_SUBMIT_ARGS+=(${EVENT_LOG_CONF[@]+"${EVENT_LOG_CONF[@]}"})
 
-    # OAuth-protected Spark UI alongside Connect (opt-in: OAUTH_ENABLED=true).
+    # OAuth-protected Spark UI alongside Connect (driven by AUTH_ENABLED).
     # init.sh assembles OAUTH_CONF (ui ingress + oauth2-proxy sidecar confs);
     # the UI gets its own Ingress next to the Connect gRPC one.
     SPARK_SUBMIT_ARGS+=(${OAUTH_CONF[@]+"${OAUTH_CONF[@]}"})
 
     # Master auth switch: AUTH_ENABLED drives JWT auth, the Connect ingress, and
     # the OAuth UI together (see config.sh). AUTH_ENABLED=false means nothing is
-    # exposed and nothing is authenticated (kubectl port-forward mode). An
-    # explicitly exported SPARK_CONNECT_INGRESS still wins over the cascade.
-    SPARK_CONNECT_INGRESS="${SPARK_CONNECT_INGRESS:-${AUTH_ENABLED:-false}}"
+    # exposed and nothing is authenticated (kubectl port-forward mode).
     if [ "${AUTH_ENABLED:-false}" = "true" ]; then
         if [ -z "${SPARK_ARMADA_CONNECT_OWNER:-}" ]; then
             echo "Error: AUTH_ENABLED=true requires SPARK_ARMADA_CONNECT_OWNER so the"
@@ -191,11 +189,10 @@ if [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
         [ -n "${OIDC_JWKS_URL:-}" ]   && SPARK_SUBMIT_ARGS+=(--conf spark.kubernetes.driverEnv.OIDC_JWKS_URL=$OIDC_JWKS_URL)
     fi
 
-    # Auto-enable Armada ingress for the gRPC port when SPARK_CONNECT_INGRESS=true.
-    # Skip with: SPARK_CONNECT_INGRESS=false ./scripts/runJupyter.sh -C
+    # Armada ingress for the Connect gRPC port (driven by AUTH_ENABLED).
     # SPARK_CONNECT_INGRESS_TLS=true + SPARK_CONNECT_INGRESS_CERT=<secret-name> turns
     # on TLS termination at the ingress, using the named K8s TLS Secret.
-    if [ "${SPARK_CONNECT_INGRESS:-false}" = "true" ]; then
+    if [ "${AUTH_ENABLED:-false}" = "true" ]; then
         SPARK_SUBMIT_ARGS+=(
             --conf spark.armada.driver.connect.ingress.enabled=true
             --conf spark.armada.driver.connect.ingress.tls.enabled=${SPARK_CONNECT_INGRESS_TLS:-false}
@@ -227,7 +224,10 @@ if [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
                    | sed -E 's/.*:([a-z0-9]+),.*/\1/')"
     rm -f "$SUBMIT_LOG"
 
-    if [ -n "$DRIVER_JOB_ID" ] && [ -z "${SPARK_CONNECT_HOST:-}" ]; then
+    # Derive the per-job ingress hostname only when the ingress exists
+    # (AUTH_ENABLED); in port-forward mode the Jupyter container keeps its
+    # host.docker.internal default.
+    if [ "${AUTH_ENABLED:-false}" = "true" ] && [ -n "$DRIVER_JOB_ID" ] && [ -z "${SPARK_CONNECT_HOST:-}" ]; then
         # Match the executor's Ingress template:
         #   driver-<port>-armada-<jobid>-0.<namespace>.<hostnameSuffix>
         export SPARK_CONNECT_HOST="driver-${CONNECT_PORT}-armada-${DRIVER_JOB_ID}-0.${ARMADA_NAMESPACE:-default}.${SPARK_CONNECT_INGRESS_DOMAIN:-sudiptobaral.com}"

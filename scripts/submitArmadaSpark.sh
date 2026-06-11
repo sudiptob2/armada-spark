@@ -69,7 +69,7 @@ SPARK_SUBMIT_ARGS+=("${DEPLOY_MODE_ARGS[@]}")
 # Add auth args
 SPARK_SUBMIT_ARGS+=("${ARMADA_AUTH_ARGS[@]}")
 
-# Add OAuth conf (when OAUTH_ENABLED=true)
+# Add OAuth conf (when AUTH_ENABLED=true)
 if [ "${#OAUTH_CONF[@]}" -gt 0 ]; then
     SPARK_SUBMIT_ARGS+=("${OAUTH_CONF[@]}")
 fi

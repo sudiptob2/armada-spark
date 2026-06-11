@@ -164,10 +164,9 @@ if [ "${ARMADA_AUTH_TOKEN:-}" != "" ]; then
 fi
 
 # OAuth proxy for the Spark UI. Requires cluster deploy mode + ingress.
-# OAUTH_ENABLED follows the master AUTH_ENABLED switch unless set explicitly.
-OAUTH_ENABLED="${OAUTH_ENABLED:-${AUTH_ENABLED:-false}}"
+# Driven by the master AUTH_ENABLED switch (see config.sh).
 OAUTH_CONF=()
-if [ "${OAUTH_ENABLED}" == "true" ]; then
+if [ "${AUTH_ENABLED:-false}" == "true" ]; then
     OAUTH_CONF=(
         --conf spark.armada.driver.ui.ingress.enabled=true
         --conf spark.armada.driver.ui.ingress.tls.enabled=${OAUTH_INGRESS_TLS:-false}
