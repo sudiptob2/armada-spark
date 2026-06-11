@@ -227,16 +227,26 @@ They can be set in the [conf](../conf/spark-defaults.conf) file.
 - `spark.armada.executor.jobItemTemplate` - URL or file path to a job item template YAML file for the executors.
     Supports local files (with or without file:// prefix) and HTTP/HTTPS URLs.
     The template should contain a JobSubmitRequestItem configuration in YAML format.
-- `spark.armada.driver.ingress.enabled` - If set to true, the driver will be
-    exposed via an Ingress resource. This is useful for accessing the Spark UI
-    and other services running on the driver pod.
-- `spark.armada.driver.ingress.tls.enabled` - If set to true, the Ingress resource
-    for the driver will be configured to use TLS.
-- `spark.armada.driver.ingress.annotations` - A comma-separated list of annotations to apply to the Ingress resource for the driver.
+- `spark.armada.driver.ui.ingress.enabled` - If set to true, the Spark UI is
+    exposed via an Ingress resource. The Ingress targets `spark.ui.port`
+    (default 4040), or the OAuth proxy port (default 4180) when
+    `spark.armada.oauth.enabled=true`.
+- `spark.armada.driver.ui.ingress.tls.enabled` - If set to true, the Spark UI Ingress
+    resource is configured to use TLS.
+- `spark.armada.driver.ui.ingress.annotations` - A comma-separated list of annotations to apply to the Spark UI Ingress resource.
     Annotations should be in the format key=value, e.g. `nginx.ingress.kubernetes.io/rewrite-target=/`.
-- `spark.armada.driver.ingress.certName` - The name of the TLS certificate to use for the Ingress resource.
-    This is used when `spark.armada.driver.ingress.tls.enabled` is set to true.
-- `spark.armada.driver.ingress.port` - The port to expose via Ingress. If not set, defaults to OAuth proxy port (if enabled) or Spark UI port.
+- `spark.armada.driver.ui.ingress.certName` - The name of the TLS certificate to use for the Spark UI Ingress resource.
+    This is used when `spark.armada.driver.ui.ingress.tls.enabled` is set to true.
+- `spark.armada.driver.connect.ingress.enabled` - If set to true, the Spark Connect
+    gRPC endpoint is exposed via its own Ingress resource. The port is read from
+    `spark.connect.grpc.binding.port` (default 15002). Can be enabled together with
+    the UI ingress; each Ingress object carries its own annotations.
+- `spark.armada.driver.connect.ingress.tls.enabled` - If set to true, the Spark Connect
+    Ingress resource is configured to use TLS.
+- `spark.armada.driver.connect.ingress.annotations` - A comma-separated list of annotations to apply to the Spark Connect Ingress resource
+    (e.g. `nginx.ingress.kubernetes.io/backend-protocol=GRPC`).
+- `spark.armada.driver.connect.ingress.certName` - The name of the TLS certificate to use for the Spark Connect Ingress resource.
+    This is used when `spark.armada.driver.connect.ingress.tls.enabled` is set to true.
 
 ### OAuth2 Authentication Configuration
 

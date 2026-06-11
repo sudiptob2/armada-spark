@@ -214,6 +214,8 @@ Pass `-C` to run in Spark Connect mode (experimental). The Spark Connect server 
 
 Use `kubectl port-forward` command for the connect port (`15002`). Allocation follows `-A static|dynamic` (default dynamic); in static mode set `EXECUTOR_INSTANCES` to choose the executor count. 
 
+Alternatively, set `spark.armada.driver.connect.ingress.enabled=true` to provision a per-driver Ingress targeting the Spark Connect port read from `spark.connect.grpc.binding.port` (default `15002`). The group's `annotations`, `tls.enabled`, and `certName` keys mirror the Spark UI ingress group (`spark.armada.driver.ui.ingress.*`); both ingresses can be enabled at the same time, each with its own annotations (e.g. a gRPC backend protocol for Connect and HTTP for the UI).
+
 See [`spark_connect_demo.ipynb`](example/jupyter/notebooks/spark_connect_demo.ipynb).
 
 ##### Securing Spark Connect with JWT

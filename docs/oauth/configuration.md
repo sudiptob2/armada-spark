@@ -102,9 +102,9 @@ spark.armada.oauth.enabled=true
 spark.armada.oauth.clientId=spark-oauth-client
 spark.armada.oauth.clientSecretK8s=spark-oauth-secret
 spark.armada.oauth.issuerUrl=https://keycloak.example.com/realms/spark
-spark.armada.driver.ingress.enabled=true
-spark.armada.driver.ingress.tls.enabled=true
-spark.armada.driver.ingress.certName=my-tls-cert
+spark.armada.driver.ui.ingress.enabled=true
+spark.armada.driver.ui.ingress.tls.enabled=true
+spark.armada.driver.ui.ingress.certName=my-tls-cert
 ```
 
 Plus the K8s secret:
@@ -127,7 +127,7 @@ spark.armada.oauth.loginUrl=https://idp.example.com/auth
 spark.armada.oauth.redeemUrl=http://idp.cluster.local/token
 spark.armada.oauth.validateUrl=http://idp.cluster.local/userinfo
 spark.armada.oauth.jwksUrl=http://idp.cluster.local/certs
-spark.armada.driver.ingress.enabled=true
+spark.armada.driver.ui.ingress.enabled=true
 ```
 
 **Pick the right vantage point per URL:**
@@ -149,7 +149,7 @@ spark.armada.oauth.cookieSecure=true
 spark.armada.oauth.cookieSamesite=lax
 spark.armada.oauth.cookieCsrfPerRequest=true
 spark.armada.oauth.redirectUrl=https://spark-ui-pinned.corp.com/oauth2/callback
-spark.armada.driver.ingress.enabled=true
-spark.armada.driver.ingress.tls.enabled=true
-spark.armada.driver.ingress.certName=corp-tls-cert
+spark.armada.driver.ui.ingress.enabled=true
+spark.armada.driver.ui.ingress.tls.enabled=true
+spark.armada.driver.ui.ingress.certName=corp-tls-cert
 ```

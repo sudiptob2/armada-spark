@@ -11,9 +11,9 @@ When `spark.armada.oauth.enabled=true`, an oauth2-proxy sidecar runs inside the 
   --name my-secure-job \
   --class org.apache.spark.examples.SparkPi \
   --conf spark.armada.container.image=armada-spark \
-  --conf spark.armada.driver.ingress.enabled=true \
-  --conf spark.armada.driver.ingress.tls.enabled=true \
-  --conf spark.armada.driver.ingress.certName=my-tls-cert \
+  --conf spark.armada.driver.ui.ingress.enabled=true \
+  --conf spark.armada.driver.ui.ingress.tls.enabled=true \
+  --conf spark.armada.driver.ui.ingress.certName=my-tls-cert \
   --conf spark.armada.oauth.enabled=true \
   --conf spark.armada.oauth.clientId=spark-oauth-client \
   --conf spark.armada.oauth.clientSecret=your-secret \

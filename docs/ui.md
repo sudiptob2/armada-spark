@@ -15,7 +15,7 @@ Then open: `http://localhost:4040`
 ### Basic Ingress (no auth)
 
 ```bash
---conf spark.armada.driver.ingress.enabled=true
+--conf spark.armada.driver.ui.ingress.enabled=true
 ```
 
 **Warning:** Exposes UI publicly without authentication!

@@ -8,7 +8,6 @@ Where ports go, how requests flow, and what changes when OAuth is enabled.
 |-------|----------------|---------------------------------------------------------------------|----------------------------------|
 | 4040  | Spark driver   | Spark UI (Jetty servlet, `spark.ui.port`)                           | Loopback only when OAuth on      |
 | 4180  | oauth2-proxy   | Proxy listen port (`spark.armada.oauth.proxy.port`)                 | Exposed via Service+Ingress      |
-| —     | Ingress        | Port for driver ingress (`spark.armada.driver.ingress.port`)        | Exposed via Service+Ingress      |
 | 7078  | Spark driver   | Driver RPC port (executors connect here)                            | Service only (cluster-internal)  |
 | 7079  | Spark driver   | Block manager port                                                  | Internal                         |
 
@@ -27,14 +26,16 @@ OAuth on → proxy port (4180). OAuth off → Spark UI port (4040).
 
 ## Truth table
 
-| Ingress | OAuth | Driver container ports | Service ports                       | Ingress backend |
-|---------|-------|------------------------|--------------------------------------|-----------------|
-| off     | off   | `[driver]`             | `[driver, 4040]`                     | (no Ingress)    |
-| off     | on    | `[driver]`             | `[driver, 4180]` (proxy via sidecar) | (no Ingress)    |
-| on      | off   | `[driver, ui]`         | `[driver, 4040]`                     | 4040            |
-| on      | on    | `[driver]`             | `[driver, 4180]` (proxy via sidecar) | 4180            |
+| UI Ingress | OAuth | Driver container ports | Service ports                       | Ingress backend |
+|------------|-------|------------------------|--------------------------------------|-----------------|
+| off        | off   | `[driver]`             | `[driver, 4040]`                     | (no Ingress)    |
+| off        | on    | `[driver]`             | `[driver, 4180]` (proxy via sidecar) | (no Ingress)    |
+| on         | off   | `[driver, ui]`         | `[driver, 4040]`                     | 4040            |
+| on         | on    | `[driver]`             | `[driver, 4180]` (proxy via sidecar) | 4180            |
 
 The driver container never declares the proxy port: Armada extracts native-sidecar ports automatically. When OAuth is on, the driver also drops the UI port; the proxy reaches it via loopback.
+
+Note: Armada filters requested Service/Ingress ports against the ports actually declared on main containers and native sidecars, and silently drops any that are not declared. So in the ingress-off rows above, a requested Service port like 4040 does not materialize server-side unless a container declares it; ContainerPort declarations are load-bearing, not advisory.
 
 ## Service shape
 
@@ -53,7 +54,7 @@ Driver RPC is always first so executors can connect to `service-0`.
 
 ## Ingress shape
 
-[`resolveIngressConfig`](../../src/main/scala/org/apache/spark/deploy/armada/submit/ArmadaClientApplication.scala):
+[`resolveUIIngressConfig`](../../src/main/scala/org/apache/spark/deploy/armada/submit/ArmadaClientApplication.scala):
 
 ```scala
 val ingressPort = ArmadaClientApplication.getEffectiveUIPort(conf)
@@ -102,15 +103,16 @@ flowchart LR
 
 ## Ingress hostname
 
-Armada generates the host as `<port-name>-<port>-armada-<job-id>-0.<namespace>.svc`:
+Armada generates the host as `<container-name>-<port>-armada-<job-id>-0.<namespace>.<hostname-suffix>`. The prefix is the name of the container that declares the port (not the container port name). The driver container is named `driver` and the OAuth sidecar container is named `oauth`, so:
 
-- OAuth on: `oauth-4180-armada-<job-id>-0.<ns>.svc`
-- OAuth off: `ui-4040-armada-<job-id>-0.<ns>.svc`
+- OAuth on: `oauth-4180-armada-<job-id>-0.<ns>.<suffix>`
+- OAuth off: `driver-4040-armada-<job-id>-0.<ns>.<suffix>`
+- Spark Connect ingress (when `spark.armada.driver.connect.ingress.enabled=true`): `driver-15002-armada-<job-id>-0.<ns>.<suffix>`
 
 Find it via Lookout (Result tab) or `kubectl get ingress -n <namespace>`.
 
 ## TLS termination
 
-TLS terminates at the Ingress when `spark.armada.driver.ingress.tls.enabled=true` and `spark.armada.driver.ingress.certName` references a valid TLS secret. Inside the cluster, traffic from Ingress to proxy and from proxy to Spark UI is plain HTTP. Setting `cookieSecure=true` on oauth2-proxy adds the `Secure` attribute to the Set-Cookie header so browsers only send the cookie over HTTPS; the in-cluster hop is unaffected.
+TLS terminates at the Ingress when `spark.armada.driver.ui.ingress.tls.enabled=true` and `spark.armada.driver.ui.ingress.certName` references a valid TLS secret. Inside the cluster, traffic from Ingress to proxy and from proxy to Spark UI is plain HTTP. Setting `cookieSecure=true` on oauth2-proxy adds the `Secure` attribute to the Set-Cookie header so browsers only send the cookie over HTTPS; the in-cluster hop is unaffected.
 
 End-to-end TLS (Ingress and proxy both on TLS) is possible via `--tls-cert-file` / `--tls-key-file`, but the builder does not surface these as Spark config keys.
