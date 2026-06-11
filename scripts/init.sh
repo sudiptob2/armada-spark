@@ -164,12 +164,14 @@ if [ "${ARMADA_AUTH_TOKEN:-}" != "" ]; then
 fi
 
 # OAuth proxy for the Spark UI. Requires cluster deploy mode + ingress.
+# OAUTH_ENABLED follows the master AUTH_ENABLED switch unless set explicitly.
+OAUTH_ENABLED="${OAUTH_ENABLED:-${AUTH_ENABLED:-false}}"
 OAUTH_CONF=()
-if [ "${OAUTH_ENABLED:-false}" == "true" ]; then
+if [ "${OAUTH_ENABLED}" == "true" ]; then
     OAUTH_CONF=(
-        --conf spark.armada.driver.ingress.enabled=true
-        --conf spark.armada.driver.ingress.tls.enabled=false
-        --conf "spark.armada.driver.ingress.annotations=nginx.ingress.kubernetes.io/server-alias=${OAUTH_INGRESS_HOST:-spark-ui.test}"
+        --conf spark.armada.driver.ui.ingress.enabled=true
+        --conf spark.armada.driver.ui.ingress.tls.enabled=${OAUTH_INGRESS_TLS:-false}
+        --conf "spark.armada.driver.ui.ingress.annotations=nginx.ingress.kubernetes.io/server-alias=${OAUTH_INGRESS_HOST:-spark-ui.test}"
         --conf spark.armada.oauth.enabled=true
         --conf spark.armada.oauth.clientId="${OAUTH_CLIENT_ID:-spark-ui}"
         --conf spark.armada.oauth.clientSecret="${OAUTH_CLIENT_SECRET:-dex-spark-ui-secret}"
@@ -179,6 +181,8 @@ if [ "${OAUTH_ENABLED:-false}" == "true" ]; then
         --conf spark.armada.oauth.cookieSecure="${OAUTH_COOKIE_SECURE:-false}"
         --conf spark.armada.oauth.passHostHeader="${OAUTH_PASS_HOST_HEADER:-true}"
     )
+    [ -n "${OAUTH_INGRESS_CERT:-}" ] && \
+        OAUTH_CONF+=(--conf spark.armada.driver.ui.ingress.certName=$OAUTH_INGRESS_CERT)
 fi
 
 # Build deploy-mode specific arguments array

@@ -165,6 +165,21 @@ if [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
     # Add event log conf
     SPARK_SUBMIT_ARGS+=(${EVENT_LOG_CONF[@]+"${EVENT_LOG_CONF[@]}"})
 
+    # OAuth-protected Spark UI alongside Connect (opt-in: OAUTH_ENABLED=true).
+    # init.sh assembles OAUTH_CONF (ui ingress + oauth2-proxy sidecar confs);
+    # the UI gets its own Ingress next to the Connect gRPC one.
+    SPARK_SUBMIT_ARGS+=(${OAUTH_CONF[@]+"${OAUTH_CONF[@]}"})
+
+    # Master auth switch: AUTH_ENABLED drives the Connect ingress, JWT auth, and
+    # the OAuth UI together (see config.sh). An explicitly exported
+    # SPARK_CONNECT_INGRESS still wins over the cascade.
+    SPARK_CONNECT_INGRESS="${SPARK_CONNECT_INGRESS:-${AUTH_ENABLED:-false}}"
+    if [ "${AUTH_ENABLED:-false}" = "true" ] && [ -z "${SPARK_ARMADA_CONNECT_OWNER:-}" ]; then
+        echo "Error: AUTH_ENABLED=true requires SPARK_ARMADA_CONNECT_OWNER so the"
+        echo "Connect endpoint is never exposed without JWT auth."
+        exit 1
+    fi
+
     # Auto-enable JWT auth when SPARK_ARMADA_CONNECT_OWNER is set.
     # Skip auth for one run with: SPARK_ARMADA_CONNECT_OWNER= ./scripts/runJupyter.sh -C
     if [ -n "${SPARK_ARMADA_CONNECT_OWNER:-}" ]; then
@@ -184,13 +199,12 @@ if [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
     # on TLS termination at the ingress, using the named K8s TLS Secret.
     if [ "${SPARK_CONNECT_INGRESS:-false}" = "true" ]; then
         SPARK_SUBMIT_ARGS+=(
-            --conf spark.armada.driver.ingress.enabled=true
-            --conf spark.armada.driver.ingress.port=$CONNECT_PORT
-            --conf spark.armada.driver.ingress.tls.enabled=${SPARK_CONNECT_INGRESS_TLS:-false}
-            --conf "spark.armada.driver.ingress.annotations=nginx.ingress.kubernetes.io/backend-protocol=GRPC,nginx.ingress.kubernetes.io/grpc-read-timeout=86400,nginx.ingress.kubernetes.io/grpc-send-timeout=86400,nginx.ingress.kubernetes.io/proxy-read-timeout=86400,nginx.ingress.kubernetes.io/proxy-send-timeout=86400,nginx.ingress.kubernetes.io/proxy-body-size=0"
+            --conf spark.armada.driver.connect.ingress.enabled=true
+            --conf spark.armada.driver.connect.ingress.tls.enabled=${SPARK_CONNECT_INGRESS_TLS:-false}
+            --conf "spark.armada.driver.connect.ingress.annotations=nginx.ingress.kubernetes.io/backend-protocol=GRPC,nginx.ingress.kubernetes.io/grpc-read-timeout=86400,nginx.ingress.kubernetes.io/grpc-send-timeout=86400,nginx.ingress.kubernetes.io/proxy-read-timeout=86400,nginx.ingress.kubernetes.io/proxy-send-timeout=86400,nginx.ingress.kubernetes.io/proxy-body-size=0"
         )
         [ -n "${SPARK_CONNECT_INGRESS_CERT:-}" ] && \
-            SPARK_SUBMIT_ARGS+=(--conf spark.armada.driver.ingress.certName=$SPARK_CONNECT_INGRESS_CERT)
+            SPARK_SUBMIT_ARGS+=(--conf spark.armada.driver.connect.ingress.certName=$SPARK_CONNECT_INGRESS_CERT)
     fi
 
     # Add primary resource
