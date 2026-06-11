@@ -170,19 +170,17 @@ if [ "$USE_SPARK_CONNECT" = true ] && [ "$SKIP_SUBMIT" = false ]; then
     # the UI gets its own Ingress next to the Connect gRPC one.
     SPARK_SUBMIT_ARGS+=(${OAUTH_CONF[@]+"${OAUTH_CONF[@]}"})
 
-    # Master auth switch: AUTH_ENABLED drives the Connect ingress, JWT auth, and
-    # the OAuth UI together (see config.sh). An explicitly exported
-    # SPARK_CONNECT_INGRESS still wins over the cascade.
+    # Master auth switch: AUTH_ENABLED drives JWT auth, the Connect ingress, and
+    # the OAuth UI together (see config.sh). AUTH_ENABLED=false means nothing is
+    # exposed and nothing is authenticated (kubectl port-forward mode). An
+    # explicitly exported SPARK_CONNECT_INGRESS still wins over the cascade.
     SPARK_CONNECT_INGRESS="${SPARK_CONNECT_INGRESS:-${AUTH_ENABLED:-false}}"
-    if [ "${AUTH_ENABLED:-false}" = "true" ] && [ -z "${SPARK_ARMADA_CONNECT_OWNER:-}" ]; then
-        echo "Error: AUTH_ENABLED=true requires SPARK_ARMADA_CONNECT_OWNER so the"
-        echo "Connect endpoint is never exposed without JWT auth."
-        exit 1
-    fi
-
-    # Auto-enable JWT auth when SPARK_ARMADA_CONNECT_OWNER is set.
-    # Skip auth for one run with: SPARK_ARMADA_CONNECT_OWNER= ./scripts/runJupyter.sh -C
-    if [ -n "${SPARK_ARMADA_CONNECT_OWNER:-}" ]; then
+    if [ "${AUTH_ENABLED:-false}" = "true" ]; then
+        if [ -z "${SPARK_ARMADA_CONNECT_OWNER:-}" ]; then
+            echo "Error: AUTH_ENABLED=true requires SPARK_ARMADA_CONNECT_OWNER so the"
+            echo "Connect endpoint is never exposed without JWT auth."
+            exit 1
+        fi
         SPARK_SUBMIT_ARGS+=(
             --conf spark.connect.grpc.interceptor.classes=io.armadaproject.spark.connect.auth.JwtAuthInterceptor
             --conf spark.kubernetes.driverEnv.SPARK_ARMADA_CONNECT_OWNER=$SPARK_ARMADA_CONNECT_OWNER
