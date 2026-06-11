@@ -83,10 +83,10 @@ class E2ETestBuilder(testName: String) {
 
   /** Enable driver ingress with annotations */
   def withDriverIngress(annotations: Map[String, String] = Map.empty): E2ETestBuilder = {
-    withSparkConf("spark.armada.driver.ingress.enabled", "true")
+    withSparkConf("spark.armada.driver.ui.ingress.enabled", "true")
     if (annotations.nonEmpty) {
       withSparkConf(
-        "spark.armada.driver.ingress.annotations",
+        "spark.armada.driver.ui.ingress.annotations",
         annotations.map { case (k, v) => s"$k=$v" }.mkString(",")
       )
     }

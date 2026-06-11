@@ -109,37 +109,75 @@ private[spark] object Config {
       )
       .createOptional
 
-  val ARMADA_SPARK_DRIVER_INGRESS_ENABLED: ConfigEntry[Boolean] =
-    ConfigBuilder("spark.armada.driver.ingress.enabled")
+  val ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED: ConfigEntry[Boolean] =
+    ConfigBuilder("spark.armada.driver.ui.ingress.enabled")
       .doc(
-        "If set to true, the driver will be exposed via an Ingress resource. " +
-          "This is useful for accessing the Spark UI."
+        "If set to true, the Spark UI is exposed via an Ingress resource. " +
+          "The ingress targets the Spark UI port, or the OAuth proxy port when " +
+          "spark.armada.oauth.enabled is true."
       )
       .booleanConf
       .createWithDefault(false)
 
-  val ARMADA_SPARK_DRIVER_INGRESS_TLS_ENABLED: OptionalConfigEntry[Boolean] =
-    ConfigBuilder("spark.armada.driver.ingress.tls.enabled")
+  val ARMADA_SPARK_DRIVER_UI_INGRESS_TLS_ENABLED: OptionalConfigEntry[Boolean] =
+    ConfigBuilder("spark.armada.driver.ui.ingress.tls.enabled")
       .doc(
-        "Whether to enable TLS for the driver Ingress resource. " +
-          "If not set, TLS will be disabled by default."
+        "Whether to enable TLS for the Spark UI Ingress resource. " +
+          "If not set, TLS is disabled by default."
       )
       .booleanConf
       .createOptional
 
-  val ARMADA_SPARK_DRIVER_INGRESS_ANNOTATIONS: OptionalConfigEntry[String] =
-    ConfigBuilder("spark.armada.driver.ingress.annotations")
+  val ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS: OptionalConfigEntry[String] =
+    ConfigBuilder("spark.armada.driver.ui.ingress.annotations")
       .doc(
-        "A comma-separated list of annotations (in key=value format) to be added to the driver Ingress resource."
+        "A comma-separated list of annotations (in key=value format) to be added to the Spark UI Ingress resource."
       )
       .stringConf
       .checkValue(k8sAnnotationListValidator, invalidAnnotationListErrorMessage)
       .createOptional
 
-  val ARMADA_SPARK_DRIVER_INGRESS_CERT_NAME: OptionalConfigEntry[String] =
-    ConfigBuilder("spark.armada.driver.ingress.certName")
+  val ARMADA_SPARK_DRIVER_UI_INGRESS_CERT_NAME: OptionalConfigEntry[String] =
+    ConfigBuilder("spark.armada.driver.ui.ingress.certName")
       .doc(
-        "The name of the TLS certificate to use for the driver Ingress resource."
+        "The name of the TLS certificate to use for the Spark UI Ingress resource."
+      )
+      .stringConf
+      .createOptional
+
+  val ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED: ConfigEntry[Boolean] =
+    ConfigBuilder("spark.armada.driver.connect.ingress.enabled")
+      .doc(
+        "If set to true, the Spark Connect gRPC endpoint is exposed via an Ingress resource. " +
+          "The ingress targets spark.connect.grpc.binding.port (default 15002)."
+      )
+      .booleanConf
+      .createWithDefault(false)
+
+  val ARMADA_SPARK_DRIVER_CONNECT_INGRESS_TLS_ENABLED: OptionalConfigEntry[Boolean] =
+    ConfigBuilder("spark.armada.driver.connect.ingress.tls.enabled")
+      .doc(
+        "Whether to enable TLS for the Spark Connect Ingress resource. " +
+          "If not set, TLS is disabled by default."
+      )
+      .booleanConf
+      .createOptional
+
+  val ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ANNOTATIONS: OptionalConfigEntry[String] =
+    ConfigBuilder("spark.armada.driver.connect.ingress.annotations")
+      .doc(
+        "A comma-separated list of annotations (in key=value format) to be added to the " +
+          "Spark Connect Ingress resource. Kept separate from the UI ingress annotations so " +
+          "the Connect ingress can use gRPC backend annotations while the UI ingress uses HTTP."
+      )
+      .stringConf
+      .checkValue(k8sAnnotationListValidator, invalidAnnotationListErrorMessage)
+      .createOptional
+
+  val ARMADA_SPARK_DRIVER_CONNECT_INGRESS_CERT_NAME: OptionalConfigEntry[String] =
+    ConfigBuilder("spark.armada.driver.connect.ingress.certName")
+      .doc(
+        "The name of the TLS certificate to use for the Spark Connect Ingress resource."
       )
       .stringConf
       .createOptional
@@ -771,10 +809,4 @@ private[spark] object Config {
       .map(_.trim)
       .toSeq
   }
-
-  val ARMADA_SPARK_DRIVER_INGRESS_PORT: OptionalConfigEntry[Int] =
-    ConfigBuilder("spark.armada.driver.ingress.port")
-      .doc("Port for driver ingress")
-      .intConf
-      .createOptional
 }

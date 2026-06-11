@@ -901,7 +901,7 @@ class ArmadaClientApplicationSuite extends AnyFunSuite with BeforeAndAfter with 
       nodeSelectors = Map.empty,
       driverResources = armadaClientApp.ResolvedResourceConfig(None, None, None, None),
       executorResources = armadaClientApp.ResolvedResourceConfig(None, None, None, None),
-      driverIngress = Some(
+      uiIngress = Some(
         IngressConfig(
           ports = Seq(7078),
           annotations = Map("nginx.ingress.kubernetes.io/rewrite-target" -> "/"),
@@ -1227,9 +1227,8 @@ class ArmadaClientApplicationSuite extends AnyFunSuite with BeforeAndAfter with 
     result.labels should contain("runtime-label" -> "runtime-value")
   }
 
-  test("resolveIngressConfig should follow CLI > template > default precedence") {
+  test("resolveUIIngressConfig should follow CLI > template > default precedence") {
     sparkConf.set("spark.ui.port", "7078")
-    sparkConf.set("spark.armada.driver.ingress.port", "7078")
     val templateIngress = IngressConfig(
       ports = Seq(8080),
       annotations = Map("foo" -> "template"),
@@ -1243,7 +1242,7 @@ class ArmadaClientApplicationSuite extends AnyFunSuite with BeforeAndAfter with 
       certName = None
     )
 
-    val result = armadaClientApp.resolveIngressConfig(
+    val result = armadaClientApp.resolveUIIngressConfig(
       Some(cliIngress),
       Some(templateIngress),
       sparkConf
@@ -1258,8 +1257,8 @@ class ArmadaClientApplicationSuite extends AnyFunSuite with BeforeAndAfter with 
     result.certName shouldBe "template-cert"
   }
 
-  test("resolveIngressConfig should use defaults when no CLI or template values") {
-    val result = armadaClientApp.resolveIngressConfig(None, None, sparkConf)
+  test("resolveUIIngressConfig should use defaults when no CLI or template values") {
+    val result = armadaClientApp.resolveUIIngressConfig(None, None, sparkConf)
 
     result.ports shouldBe Seq(4040)
     result.annotations shouldBe Map.empty
@@ -2498,37 +2497,37 @@ class ArmadaClientApplicationSuite extends AnyFunSuite with BeforeAndAfter with 
     merged.getSpec.getHostname shouldBe "template-hostname"
   }
 
-  test("parseCLIConfig should set driverIngress when ingress enabled via SparkConf") {
+  test("parseCLIConfig should set uiIngress when ingress enabled via SparkConf") {
     val ingressConf = new SparkConf()
       .set("spark.master", "armada://localhost:50051")
       .set("spark.app.name", "test-app")
       .set(Config.ARMADA_JOB_QUEUE.key, "test-queue")
       .set(Config.CONTAINER_IMAGE.key, DEFAULT_IMAGE_NAME)
-      .set(Config.ARMADA_SPARK_DRIVER_INGRESS_ENABLED.key, "true")
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
       .set(
-        Config.ARMADA_SPARK_DRIVER_INGRESS_ANNOTATIONS.key,
+        Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS.key,
         "nginx.ingress.kubernetes.io/rewrite-target=/,nginx.ingress.kubernetes.io/backend-protocol=HTTP"
       )
-      .set(Config.ARMADA_SPARK_DRIVER_INGRESS_TLS_ENABLED.key, "false")
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_TLS_ENABLED.key, "false")
 
     val cliConfig = armadaClientApp.parseCLIConfig(ingressConf)
 
-    cliConfig.driverIngress shouldBe defined
-    val ingress = cliConfig.driverIngress.get
+    cliConfig.uiIngress shouldBe defined
+    val ingress = cliConfig.uiIngress.get
     ingress.annotations should contain("nginx.ingress.kubernetes.io/rewrite-target" -> "/")
     ingress.annotations should contain("nginx.ingress.kubernetes.io/backend-protocol" -> "HTTP")
     ingress.tls shouldBe Some(false)
   }
 
-  test("resolveJobConfig should create driverIngress when CLI has ingress enabled") {
+  test("resolveJobConfig should create uiIngress when CLI has ingress enabled") {
     val ingressConf = new SparkConf()
       .set("spark.master", "armada://localhost:50051")
       .set("spark.app.name", "test-app")
       .set(Config.ARMADA_JOB_QUEUE.key, "test-queue")
       .set(Config.CONTAINER_IMAGE.key, DEFAULT_IMAGE_NAME)
-      .set(Config.ARMADA_SPARK_DRIVER_INGRESS_ENABLED.key, "true")
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
       .set(
-        Config.ARMADA_SPARK_DRIVER_INGRESS_ANNOTATIONS.key,
+        Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS.key,
         "nginx.ingress.kubernetes.io/rewrite-target=/"
       )
 
@@ -2542,34 +2541,211 @@ class ArmadaClientApplicationSuite extends AnyFunSuite with BeforeAndAfter with 
       conf = ingressConf
     )
 
-    resolvedConfig.driverIngress shouldBe defined
-    val ingress = resolvedConfig.driverIngress.get
+    resolvedConfig.uiIngress shouldBe defined
+    val ingress = resolvedConfig.uiIngress.get
     ingress.ports shouldBe Seq(4040) // Default Spark UI port
     ingress.annotations should contain("nginx.ingress.kubernetes.io/rewrite-target" -> "/")
   }
 
-  test("validateArmadaJobConfig should set driverIngress when ingress enabled") {
+  test("validateArmadaJobConfig should set uiIngress when ingress enabled") {
     val ingressConf = new SparkConf()
       .set("spark.master", "armada://localhost:50051")
       .set("spark.app.name", "test-app")
       .set(Config.ARMADA_JOB_QUEUE.key, "test-queue")
       .set(Config.CONTAINER_IMAGE.key, DEFAULT_IMAGE_NAME)
-      .set(Config.ARMADA_SPARK_DRIVER_INGRESS_ENABLED.key, "true")
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
       .set(
-        Config.ARMADA_SPARK_DRIVER_INGRESS_ANNOTATIONS.key,
+        Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS.key,
         "nginx.ingress.kubernetes.io/rewrite-target=/"
       )
-      .set(Config.ARMADA_SPARK_DRIVER_INGRESS_TLS_ENABLED.key, "false")
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_TLS_ENABLED.key, "false")
       .set("spark.kubernetes.container.image", DEFAULT_IMAGE_NAME)
 
     val armadaJobConfig =
       armadaClientApp.validateArmadaJobConfig(ingressConf, Some(clientArguments))
 
     // Verify CLI config has ingress enabled
-    armadaJobConfig.cliConfig.driverIngress shouldBe defined
-    val cliIngress = armadaJobConfig.cliConfig.driverIngress.get
+    armadaJobConfig.cliConfig.uiIngress shouldBe defined
+    val cliIngress = armadaJobConfig.cliConfig.uiIngress.get
     cliIngress.annotations should contain("nginx.ingress.kubernetes.io/rewrite-target" -> "/")
     cliIngress.tls shouldBe Some(false)
+  }
+
+  test("resolveConnectIngressConfig builds connect ingress from conf") {
+    sparkConf.set("spark.connect.grpc.binding.port", "15999")
+    val cliIngress = armadaClientApp.IngressConfig(
+      annotations = Map("nginx.ingress.kubernetes.io/backend-protocol" -> "GRPC"),
+      tls = Some(true),
+      certName = Some("wildcard-tls")
+    )
+
+    val result = armadaClientApp.resolveConnectIngressConfig(cliIngress, sparkConf)
+
+    result.ports shouldBe Seq(15999)
+    result.annotations should contain("nginx.ingress.kubernetes.io/backend-protocol" -> "GRPC")
+    result.tlsEnabled shouldBe true
+    result.certName shouldBe "wildcard-tls"
+    result.useClusterIP shouldBe true
+  }
+
+  test("resolveConnectIngressConfig defaults port to 15002 and tls off") {
+    val cliIngress = armadaClientApp.IngressConfig(Map.empty, None, None)
+
+    val result = armadaClientApp.resolveConnectIngressConfig(cliIngress, sparkConf)
+
+    result.ports shouldBe Seq(15002)
+    result.tlsEnabled shouldBe false
+    result.certName shouldBe ""
+  }
+
+  test("parseCLIConfig parses both ui and connect ingress groups") {
+    sparkConf
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
+      .set(
+        Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS.key,
+        "nginx.ingress.kubernetes.io/backend-protocol=HTTP"
+      )
+      .set(Config.ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED.key, "true")
+      .set(
+        Config.ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ANNOTATIONS.key,
+        "nginx.ingress.kubernetes.io/backend-protocol=GRPC"
+      )
+
+    val cliConfig = armadaClientApp.parseCLIConfig(sparkConf)
+
+    cliConfig.uiIngress shouldBe defined
+    cliConfig.uiIngress.get.annotations should contain(
+      "nginx.ingress.kubernetes.io/backend-protocol" -> "HTTP"
+    )
+    cliConfig.connectIngress shouldBe defined
+    cliConfig.connectIngress.get.annotations should contain(
+      "nginx.ingress.kubernetes.io/backend-protocol" -> "GRPC"
+    )
+  }
+
+  test("parseCLIConfig leaves connectIngress empty when disabled") {
+    sparkConf.set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
+
+    val cliConfig = armadaClientApp.parseCLIConfig(sparkConf)
+
+    cliConfig.uiIngress shouldBe defined
+    cliConfig.connectIngress shouldBe None
+  }
+
+  test("buildDriverContainerPorts declares only driver port by default") {
+    val ports = armadaClientApp.buildDriverContainerPorts(7078, sparkConf)
+
+    ports.map(_.name) shouldBe Seq(Some("driver"))
+    ports.head.containerPort shouldBe Some(7078)
+  }
+
+  test("buildDriverContainerPorts declares ui port when ui ingress on and oauth off") {
+    sparkConf.set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
+
+    val ports = armadaClientApp.buildDriverContainerPorts(7078, sparkConf)
+
+    ports.map(_.name.get) shouldBe Seq("driver", "ui")
+    ports(1).containerPort shouldBe Some(4040)
+  }
+
+  test("buildDriverContainerPorts skips ui port when oauth enabled") {
+    sparkConf
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
+      .set(Config.ARMADA_OAUTH_ENABLED.key, "true")
+
+    val ports = armadaClientApp.buildDriverContainerPorts(7078, sparkConf)
+
+    ports.map(_.name.get) shouldBe Seq("driver")
+  }
+
+  test("buildDriverContainerPorts declares connect port when connect ingress enabled") {
+    sparkConf.set(Config.ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED.key, "true")
+
+    val ports = armadaClientApp.buildDriverContainerPorts(7078, sparkConf)
+
+    ports.map(_.name.get) should contain("connect")
+    ports.find(_.name.contains("connect")).get.containerPort shouldBe Some(15002)
+  }
+
+  test("buildDriverContainerPorts declares connect port even when oauth enabled") {
+    sparkConf
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
+      .set(Config.ARMADA_OAUTH_ENABLED.key, "true")
+      .set(Config.ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED.key, "true")
+
+    val ports = armadaClientApp.buildDriverContainerPorts(7078, sparkConf)
+
+    ports.map(_.name.get) shouldBe Seq("driver", "connect")
+    ports(1).containerPort shouldBe Some(15002)
+  }
+
+  test("buildServiceConfig includes connect port only when connect ingress enabled") {
+    val withoutConnect = armadaClientApp.buildServiceConfig(7078, sparkConf)
+    withoutConnect.head.ports shouldBe Seq(7078, 4040)
+
+    sparkConf.set(Config.ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED.key, "true")
+    val withConnect = armadaClientApp.buildServiceConfig(7078, sparkConf)
+    withConnect.head.ports shouldBe Seq(7078, 4040, 15002)
+  }
+
+  test("mergeDriverTemplate emits ui and connect ingresses") {
+    sparkConf
+      .set(Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED.key, "true")
+      .set(
+        Config.ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS.key,
+        "nginx.ingress.kubernetes.io/backend-protocol=HTTP"
+      )
+      .set(Config.ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED.key, "true")
+      .set(
+        Config.ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ANNOTATIONS.key,
+        "nginx.ingress.kubernetes.io/backend-protocol=GRPC"
+      )
+
+    val cliConfig = armadaClientApp.parseCLIConfig(sparkConf)
+    val resolvedConfig = armadaClientApp.resolveJobConfig(
+      cliConfig = cliConfig,
+      template = None,
+      annotations = Map.empty,
+      labels = Map.empty,
+      conf = sparkConf
+    )
+
+    val armadaJobConfig = armadaClientApp.ArmadaJobConfig(
+      queue = "test-queue",
+      jobSetId = "test-job-set",
+      jobTemplate = None,
+      driverJobItemTemplate = None,
+      executorJobItemTemplate = None,
+      cliConfig = cliConfig,
+      applicationId = "armada-spark-app-id",
+      driverFeatureStepJobItem = None,
+      driverFeatureStepContainer = None,
+      executorFeatureStepJobItem = None,
+      executorFeatureStepContainer = None,
+      driverSystemProperties = Map.empty
+    )
+
+    val result = armadaClientApp.mergeDriverTemplate(
+      template = None,
+      resolvedConfig = resolvedConfig,
+      armadaJobConfig = armadaJobConfig,
+      driverPort = 7078,
+      mainClass = "org.example.SparkApp",
+      volumes = Seq.empty,
+      volumeMounts = Seq.empty,
+      additionalDriverArgs = Seq.empty,
+      conf = sparkConf
+    )
+
+    result.ingress should have size 2
+    val uiIngress = result.ingress.head
+    uiIngress.ports shouldBe Seq(4040)
+    uiIngress.annotations shouldBe Map("nginx.ingress.kubernetes.io/backend-protocol" -> "HTTP")
+    val connectIngress = result.ingress(1)
+    connectIngress.ports shouldBe Seq(15002)
+    connectIngress.annotations shouldBe Map(
+      "nginx.ingress.kubernetes.io/backend-protocol" -> "GRPC"
+    )
   }
 
   // --- Priority class tests ---

@@ -46,11 +46,14 @@ import org.apache.spark.deploy.armada.Config.{
   ARMADA_OAUTH_ENABLED,
   ARMADA_RUN_AS_USER,
   ARMADA_SERVER_INTERNAL_URL,
-  ARMADA_SPARK_DRIVER_INGRESS_ANNOTATIONS,
-  ARMADA_SPARK_DRIVER_INGRESS_CERT_NAME,
-  ARMADA_SPARK_DRIVER_INGRESS_ENABLED,
-  ARMADA_SPARK_DRIVER_INGRESS_PORT,
-  ARMADA_SPARK_DRIVER_INGRESS_TLS_ENABLED,
+  ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ANNOTATIONS,
+  ARMADA_SPARK_DRIVER_CONNECT_INGRESS_CERT_NAME,
+  ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED,
+  ARMADA_SPARK_DRIVER_CONNECT_INGRESS_TLS_ENABLED,
+  ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS,
+  ARMADA_SPARK_DRIVER_UI_INGRESS_CERT_NAME,
+  ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED,
+  ARMADA_SPARK_DRIVER_UI_INGRESS_TLS_ENABLED,
   ARMADA_SPARK_DRIVER_LABELS,
   ARMADA_SPARK_EXECUTOR_LABELS,
   ARMADA_SPARK_JOB_NAMESPACE,
@@ -162,6 +165,7 @@ private[spark] object ArmadaClientApplication {
   private val DEFAULT_NAMESPACE                = "default"
   private val DEFAULT_RUN_AS_USER              = 185
   private val DEFAULT_SPARK_UI_PORT            = 4040
+  private val DEFAULT_SPARK_CONNECT_PORT       = 15002
   private val DEFAULT_DRIVER_GRACE_PERIOD_SECS = 30L
 
   /** Returns the effective UI port - OAuth proxy port if enabled, otherwise Spark UI port. */
@@ -171,14 +175,9 @@ private[spark] object ArmadaClientApplication {
     }
   }
 
-  /** Returns the port the ingress should target.
-    *
-    * Honours `spark.armada.driver.ingress.port` when set (used by Spark Connect to point at the
-    * gRPC port 15002). Otherwise falls back to the effective UI port for backward compatibility
-    * with the existing Spark UI ingress behaviour.
-    */
-  private[submit] def getEffectiveIngressPort(conf: SparkConf): Int = {
-    conf.get(ARMADA_SPARK_DRIVER_INGRESS_PORT).getOrElse(getEffectiveUIPort(conf))
+  /** Returns the port the Spark Connect ingress targets: Spark Connect's own binding port. */
+  private[submit] def getConnectPort(conf: SparkConf): Int = {
+    conf.getInt("spark.connect.grpc.binding.port", DEFAULT_SPARK_CONNECT_PORT)
   }
 }
 
@@ -668,7 +667,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       runAsUser: Option[Long],
       driverResources: ResourceConfig,
       executorResources: ResourceConfig,
-      driverIngress: Option[IngressConfig] = None
+      uiIngress: Option[IngressConfig] = None,
+      connectIngress: Option[IngressConfig] = None
   )
 
   private[spark] case class ResourceConfig(
@@ -727,15 +727,30 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       requestMemory = conf.get(ARMADA_EXECUTOR_REQUEST_MEMORY)
     )
 
-    val driverIngress = if (conf.get(ARMADA_SPARK_DRIVER_INGRESS_ENABLED)) {
+    val uiIngress = if (conf.get(ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED)) {
       Some(
         IngressConfig(
           annotations = conf
-            .get(ARMADA_SPARK_DRIVER_INGRESS_ANNOTATIONS)
+            .get(ARMADA_SPARK_DRIVER_UI_INGRESS_ANNOTATIONS)
             .map(commaSeparatedAnnotationsToMap)
             .getOrElse(Map.empty),
-          tls = conf.get(ARMADA_SPARK_DRIVER_INGRESS_TLS_ENABLED),
-          certName = conf.get(ARMADA_SPARK_DRIVER_INGRESS_CERT_NAME)
+          tls = conf.get(ARMADA_SPARK_DRIVER_UI_INGRESS_TLS_ENABLED),
+          certName = conf.get(ARMADA_SPARK_DRIVER_UI_INGRESS_CERT_NAME)
+        )
+      )
+    } else {
+      None
+    }
+
+    val connectIngress = if (conf.get(ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED)) {
+      Some(
+        IngressConfig(
+          annotations = conf
+            .get(ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ANNOTATIONS)
+            .map(commaSeparatedAnnotationsToMap)
+            .getOrElse(Map.empty),
+          tls = conf.get(ARMADA_SPARK_DRIVER_CONNECT_INGRESS_TLS_ENABLED),
+          certName = conf.get(ARMADA_SPARK_DRIVER_CONNECT_INGRESS_CERT_NAME)
         )
       )
     } else {
@@ -759,7 +774,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       runAsUser = runAsUser,
       driverResources = driverResources,
       executorResources = executorResources,
-      driverIngress = driverIngress
+      uiIngress = uiIngress,
+      connectIngress = connectIngress
     )
   }
 
@@ -851,7 +867,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       runAsUser: Long,
       driverResources: ResolvedResourceConfig,
       executorResources: ResolvedResourceConfig,
-      driverIngress: Option[api.submit.IngressConfig] = None
+      uiIngress: Option[api.submit.IngressConfig] = None,
+      connectIngress: Option[api.submit.IngressConfig] = None
   )
 
   /** Resolved resource configuration for driver and executor pods */
@@ -921,11 +938,11 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       Duration(conf.get(ARMADA_EXECUTOR_CONNECTION_TIMEOUT), SECONDS)
     )
 
-    val resolvedIngressConfig =
-      if (cliConfig.driverIngress.isDefined || template.flatMap(_.ingress.headOption).isDefined) {
+    val resolvedUIIngressConfig =
+      if (cliConfig.uiIngress.isDefined || template.flatMap(_.ingress.headOption).isDefined) {
         Some(
-          resolveIngressConfig(
-            cliConfig.driverIngress,
+          resolveUIIngressConfig(
+            cliConfig.uiIngress,
             template.flatMap(_.ingress.headOption),
             conf
           )
@@ -933,6 +950,9 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       } else {
         None
       }
+
+    val resolvedConnectIngressConfig =
+      cliConfig.connectIngress.map(ci => resolveConnectIngressConfig(ci, conf))
 
     ResolvedJobConfig(
       namespace = resolvedNamespace,
@@ -956,7 +976,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
         cliConfig.executorResources.limitMemory,
         cliConfig.executorResources.requestMemory
       ),
-      driverIngress = resolvedIngressConfig
+      uiIngress = resolvedUIIngressConfig,
+      connectIngress = resolvedConnectIngressConfig
     )
   }
 
@@ -1205,9 +1226,8 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       services = services
     )
 
-    resolvedConfig.driverIngress
-      .map(ingress => finalJobItem.withIngress(Seq(ingress)))
-      .getOrElse(finalJobItem)
+    val ingresses = resolvedConfig.uiIngress.toSeq ++ resolvedConfig.connectIngress.toSeq
+    if (ingresses.nonEmpty) finalJobItem.withIngress(ingresses) else finalJobItem
   }
 
   private def createBlankTemplate(): JobSubmitRequestItem = {
@@ -1644,34 +1664,50 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
 
   /** Builds container ports for the driver.
     *
-    * Always includes the driver port for executor communication. When ingress is enabled and OAuth
-    * is not, exposes the effective ingress port (Spark UI port by default, or whatever
-    * `spark.armada.driver.ingress.port` overrides it to, e.g. 15002 for Spark Connect). When OAuth
-    * is enabled, the OAuth sidecar handles UI exposure so no extra port is declared here.
+    * These declarations are load-bearing: Armada only creates Service and Ingress entries for ports
+    * declared on a container (or native sidecar), so every ingress-targeted port the driver JVM
+    * owns must be declared here. The UI port is skipped when OAuth is enabled because the OAuth
+    * proxy sidecar declares its own port and the UI stays loopback-only.
     */
-  private def buildDriverContainerPorts(driverPort: Int, conf: SparkConf): Seq[ContainerPort] = {
+  private[submit] def buildDriverContainerPorts(
+      driverPort: Int,
+      conf: SparkConf
+  ): Seq[ContainerPort] = {
     val driverPortSpec = ContainerPort(
       containerPort = Some(driverPort),
       name = Some("driver"),
       protocol = Some("TCP")
     )
 
-    val ingressEnabled = conf.get(ARMADA_SPARK_DRIVER_INGRESS_ENABLED)
-    val oauthEnabled   = conf.get(ARMADA_OAUTH_ENABLED)
+    val uiPortSpec =
+      if (conf.get(ARMADA_SPARK_DRIVER_UI_INGRESS_ENABLED) && !conf.get(ARMADA_OAUTH_ENABLED)) {
+        val sparkUIPort =
+          conf.getInt("spark.ui.port", ArmadaClientApplication.DEFAULT_SPARK_UI_PORT)
+        Some(
+          ContainerPort(
+            containerPort = Some(sparkUIPort),
+            name = Some("ui"),
+            protocol = Some("TCP")
+          )
+        )
+      } else {
+        None
+      }
 
-    if (ingressEnabled && !oauthEnabled) {
-      val ingressPort = ArmadaClientApplication.getEffectiveIngressPort(conf)
-      val sparkUIPort = conf.getInt("spark.ui.port", ArmadaClientApplication.DEFAULT_SPARK_UI_PORT)
-      val portName    = if (ingressPort == sparkUIPort) "ui" else "ingress"
-      val ingressPortSpec = ContainerPort(
-        containerPort = Some(ingressPort),
-        name = Some(portName),
-        protocol = Some("TCP")
-      )
-      Seq(driverPortSpec, ingressPortSpec)
-    } else {
-      Seq(driverPortSpec)
-    }
+    val connectPortSpec =
+      if (conf.get(ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED)) {
+        Some(
+          ContainerPort(
+            containerPort = Some(ArmadaClientApplication.getConnectPort(conf)),
+            name = Some("connect"),
+            protocol = Some("TCP")
+          )
+        )
+      } else {
+        None
+      }
+
+    Seq(driverPortSpec) ++ uiPortSpec ++ connectPortSpec
   }
 
   private def newExecutorContainer(
@@ -1834,12 +1870,17 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
       driverPort: Int,
       conf: SparkConf
   ): Seq[api.submit.ServiceConfig] = {
-    val uiPort      = ArmadaClientApplication.getEffectiveUIPort(conf)
-    val ingressPort = ArmadaClientApplication.getEffectiveIngressPort(conf)
-    // Headless service exposes driver port, UI port, and (when distinct from the UI port,
-    // e.g. Spark Connect on 15002) the explicit ingress port. Otherwise nginx-ingress
-    // can't reach the gRPC backend.
-    val ports = Seq(driverPort, uiPort, ingressPort).distinct
+    val uiPort = ArmadaClientApplication.getEffectiveUIPort(conf)
+    val connectPort =
+      if (conf.get(ARMADA_SPARK_DRIVER_CONNECT_INGRESS_ENABLED)) {
+        Seq(ArmadaClientApplication.getConnectPort(conf))
+      } else {
+        Seq.empty
+      }
+    // Headless service exposes the driver port, the UI port, and the Spark Connect port when
+    // its ingress is enabled. Armada drops Service and Ingress ports that are not declared as
+    // container ports, so these stay in sync with buildDriverContainerPorts.
+    val ports = (Seq(driverPort, uiPort) ++ connectPort).distinct
     Seq(
       api.submit.ServiceConfig(
         `type` = api.submit.ServiceType.Headless,
@@ -1849,18 +1890,19 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
     )
   }
 
-  /** Resolves ingress configuration with precedence: CLI > Template > Default. Routes to OAuth
-    * proxy port if enabled, otherwise routes to Spark UI port.
+  /** Resolves the Spark UI ingress with CLI > Template > Default precedence. Job template ingress
+    * entries mean the UI ingress. Routes to the OAuth proxy port if enabled, otherwise routes to
+    * the Spark UI port.
     */
-  private[submit] def resolveIngressConfig(
+  private[submit] def resolveUIIngressConfig(
       cliIngress: Option[IngressConfig],
       templateIngress: Option[api.submit.IngressConfig],
       conf: SparkConf
   ): api.submit.IngressConfig = {
-    val ingressPort = ArmadaClientApplication.getEffectiveIngressPort(conf)
+    val uiPort = ArmadaClientApplication.getEffectiveUIPort(conf)
     api.submit.IngressConfig(
       `type` = api.submit.IngressType.Ingress,
-      ports = Seq(ingressPort),
+      ports = Seq(uiPort),
       annotations = templateIngress.map(_.annotations).getOrElse(Map.empty) ++
         cliIngress.map(_.annotations).getOrElse(Map.empty),
       tlsEnabled = resolveValue(
@@ -1873,6 +1915,23 @@ private[spark] class ArmadaClientApplication extends SparkApplication {
         templateIngress.map(_.certName),
         ""
       ),
+      useClusterIP = true
+    )
+  }
+
+  /** Resolves the Spark Connect ingress from spark.armada.driver.connect.ingress.*. Conf-only: job
+    * template ingress entries continue to mean the Spark UI ingress.
+    */
+  private[submit] def resolveConnectIngressConfig(
+      cliIngress: IngressConfig,
+      conf: SparkConf
+  ): api.submit.IngressConfig = {
+    api.submit.IngressConfig(
+      `type` = api.submit.IngressType.Ingress,
+      ports = Seq(ArmadaClientApplication.getConnectPort(conf)),
+      annotations = cliIngress.annotations,
+      tlsEnabled = cliIngress.tls.getOrElse(false),
+      certName = cliIngress.certName.getOrElse(""),
       useClusterIP = true
     )
   }

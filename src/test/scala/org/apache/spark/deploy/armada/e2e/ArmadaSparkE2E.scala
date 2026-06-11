@@ -570,7 +570,7 @@ class ArmadaSparkE2E
   private def baseIngressCLITest(executorCount: Int): E2ETestBuilder = {
     baseSparkPiTest("spark-pi-ingress", "cluster", "static", Map("test-type" -> "ingress"))
       .withDriverIngress(ingressAnnotations)
-      .withSparkConf("spark.armada.driver.ingress.tls.enabled", "false")
+      .withSparkConf("spark.armada.driver.ui.ingress.tls.enabled", "false")
       .withExecutors(executorCount)
       .assertExecutorCount(executorCount)
       .assertIngressAnnotations(ingressAnnotations)
@@ -586,7 +586,7 @@ class ArmadaSparkE2E
       .withJobTemplate(templateServer.url("spark-pi-job-template.yaml"))
       .withSparkConf(
         Map(
-          "spark.armada.driver.ingress.enabled" -> "true",
+          "spark.armada.driver.ui.ingress.enabled" -> "true",
           "spark.armada.driver.jobItemTemplate" -> templateServer.url(
             "spark-pi-driver-ingress-template.yaml"
           ),
